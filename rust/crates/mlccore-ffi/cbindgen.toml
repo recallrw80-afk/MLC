@@ -1,0 +1,15 @@
+# cbindgen 配置：生成 mlc_ffi.h 给 Qt GUI（阶段 3 接入 CMake/corrosion）
+language = "C"
+pragma_once = true
+include_guard = "MLC_FFI_H"
+cpp_compat = true
+autogen_warning = "/* 自动生成，请勿手改：cargo 构建 mlccore-ffi 时由 cbindgen 产出 */"
+
+[defines]
+"target_os = windows" = "MLC_FFI_WIN"
+
+[export]
+prefix = "mlc_"
+
+[fn]
+rename = "snake_case"

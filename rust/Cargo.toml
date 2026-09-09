@@ -1,0 +1,61 @@
+# MLC Rust workspace — SDK(mlccore) + CLI(mlc) + GUI 用 C ABI(mlccore-ffi)
+# 计划与硬约束见 ../docs/rust-rewrite-plan.md、../docs/rust-inventory.md
+[workspace]
+resolver = "2"
+members = [
+    "crates/mlccore",
+    "crates/mlc",
+    "crates/mlccore-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/recallrw80-afk/MLC"
+
+# 依赖版本集中在 workspace 管理，各 crate 用 { workspace = true } 引用
+[workspace.dependencies]
+mlccore = { path = "crates/mlccore" }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+inquire = "0.7"
+dialoguer = "0.11"
+indicatif = "0.17"
+
+# 核心
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# rustls 而非 OpenSSL：保住 musl 全静态构建。
+# 注意：reqwest(rustls→ring/aws-lc) 与 xz2(liblzma) 需要宿主 C 工具链编译 C 代码，
+# 为保证阶段 0 骨架在裸 rustup 环境可编译，这两个依赖随各自切片（下载层/自更新）落地时再启用：
+# reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+# xz2 = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util", "sync", "time"] }
+sha1 = "0.10"
+base64 = "0.22"
+# default-features=false 排除 bzip2-sys（需要 C 工具链）；deflate 走 flate2 纯 Rust 后端
+zip = { version = "2", default-features = false, features = ["deflate"] }
+encoding_rs = "0.8"
+tar = "0.4"
+# 密钥派生用（MD5 前 8 原始字节）；DES 块算法按 C++ 原实现逐行移植——它是自洽的
+# 非标准位序变体，标准 DES crate（如 des）与其不兼容，故不引入
+md-5 = "0.10"
+sysinfo = "0.30"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5"
+which = "6"
+
+[workspace.lints.rust]
+unsafe_code = "allow" # ffi crate 必须 unsafe；不在 workspace 级禁止
+
+[workspace.lints.clippy]
+all = "warn"
+
+# 发布单文件：静态链接、strip、LTO
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

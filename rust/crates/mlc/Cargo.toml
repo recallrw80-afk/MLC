@@ -1,0 +1,22 @@
+[package]
+name = "mlc"
+description = "MLC 命令行前端（Rust 重写版，对应原 C++ cli/）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mlc"
+path = "src/main.rs"
+
+[dependencies]
+mlccore.workspace = true
+clap.workspace = true
+inquire.workspace = true
+dialoguer.workspace = true
+indicatif.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

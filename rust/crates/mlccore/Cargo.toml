@@ -1,0 +1,28 @@
+[package]
+name = "mlccore"
+description = "MLC 启动器核心库（Rust 重写版，对应原 C++ libmlccore）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+# 仅用于构建期读取 git describe / commit（无第三方依赖，手写）
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+# reqwest / xz2 随下载层、自更新切片落地时启用（见 workspace Cargo.toml 注释）
+tokio.workspace = true
+sha1.workspace = true
+base64.workspace = true
+zip.workspace = true
+encoding_rs.workspace = true
+tar.workspace = true
+md-5.workspace = true
+sysinfo.workspace = true
+tracing.workspace = true
+dirs.workspace = true
+which.workspace = true

@@ -1,0 +1,57 @@
+# Rust workspace CI（阶段 0 起；与 release.yml 的 C++/Qt 流水线并存）
+# 覆盖计划要求的 5 目标：linux x86_64 / aarch64、windows x86_64(msvc)、macos x86_64+arm64。
+# musl 全静态发布构建属于阶段 4 打包工作，这里先用 gnu 目标验证交叉编译可行性。
+name: rust-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ['rust/**', '.github/workflows/rust-ci.yml']
+  pull_request:
+    paths: ['rust/**', '.github/workflows/rust-ci.yml']
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  build-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: ${{ matrix.target }}
+      # aarch64 linux 交叉：装目标架构 C 工具链（ring/aws-lc 等需要目标 cc）
+      - if: matrix.cross
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+      - run: cargo build --workspace --target ${{ matrix.target }}

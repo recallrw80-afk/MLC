@@ -1,0 +1,15 @@
+[package]
+name = "mlccore-ffi"
+description = "mlccore 的 C ABI 层（cdylib），供 Qt GUI（mlc-gui）链接"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+mlccore.workspace = true

@@ -1,5 +1,7 @@
 # 贡献指南
 
+> **⚠️ 迁移公告（2026-09）：** SDK（libmlccore）与 CLI（mlc）正在用 Rust 重写，GUI 保持 Qt/QML 不变。C++ `sdk/` 与 `cli/` 进入**功能冻结**：只接受 bug 修复，新功能请直接贡献到 `rust/` 的 Rust 核心。完整计划见 [docs/rust-rewrite-plan.md](docs/rust-rewrite-plan.md)。本文其余规则（中文注释/提交信息、整体回滚、驱动红线、文档同步）在 Rust 时代继续有效。
+
 感谢你的兴趣！提交代码前请花两分钟读完本文。
 
 ## 基本规则

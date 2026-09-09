@@ -1,0 +1,3 @@
+# 格式化规则保持接近 rustfmt 默认，减少 diff 噪音
+edition = "2021"
+newline_style = "Unix"

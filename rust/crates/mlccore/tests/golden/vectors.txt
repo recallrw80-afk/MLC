@@ -1,0 +1,17 @@
+# MLC golden vectors — cipherB64 = desEncrypt(plain, key)，TAB 分隔
+# 由 gen_vectors.cpp 生成（重生成命令见文件头）；密钥派生 = MD5(UTF-8 key) 前 8 原始字节
+# md5(MLCLiunx) hex = 2e9004af0520c1affee862f9e83ee1a3
+# md5(OtherKey123) hex = 2605826a255c15a0eeed1e2e703418b1
+	MLCLiunx	6w+LAFjWxG8=
+hello world	MLCLiunx	GvLKwtDTC4i5xeQzhYIfEQ==
+12345678	MLCLiunx	gxsiEWVDjpjrD4sAWNbEbw==
+1234567890123456	MLCLiunx	gxsiEWVDjpjtNILKkp9R4+sPiwBY1sRv
+a	MLCLiunx	8AqEiLcIviY=
+ab	MLCLiunx	ymD1duD6298=
+测试中文abc	MLCLiunx	3vuwFygS6ro25dUmDs66MQ==
+emoji😀test	MLCLiunx	ctzexcdYtiOujS4ycMQxrg==
+eyJhbGciOiJIUzI1NiJ9.payload.signature-token	MLCLiunx	spq5Ig7sBu/UeR3pOlR8eQeSG8EkBxt9yXuMtJVKIY1cDzLxpMpz+wLZkEyP6p6s
+有 空 格 与,逗号。句号！	MLCLiunx	prmdD1VcgHJsobquaoWr7iMM7Z8IsusYSNCQZXgX5It3Om801u6oVQ==
+0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef	MLCLiunx	GVACbnR+ZcU95SB+1jR/NRlQAm50fmXFPeUgftY0fzUZUAJudH5lxT3lIH7WNH81GVACbnR+ZcU95SB+1jR/NesPiwBY1sRv
+a	OtherKey123	PwL6Le7S59w=
+user@example.com	OtherKey123	xXf9JVruXpiHBk8nUo6VgvERTn3YadJt

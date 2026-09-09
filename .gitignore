@@ -90,6 +90,9 @@ CMakeLists.txt.user*
 !README.zh-CN.md
 !CONTRIBUTING.md
 !THIRD-PARTY-NOTICES.md
+!AGENTS.md
+!/docs/
+!/docs/*.md
 .gitee-token
 cmake-build-debug/
 cmake-build-release/
@@ -102,7 +105,9 @@ cmake-build-release/
 CMakeUserPresets.json
 /html
 dist
-/docs
 .env
 release.sh
 mirror-gitee.sh
+
+# Rust（阶段 0+ 的 cargo workspace；Cargo.lock 需要提交，不要忽略）
+/rust/target/
