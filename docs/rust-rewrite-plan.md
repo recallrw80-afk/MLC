@@ -42,7 +42,8 @@ rust/
 | --- | --- |
 | clap | CLI 解析，复刻 30 个命令的参数与双语 help |
 | serde + serde_json | 版本清单 / 整合包格式 / settings，全是 JSON |
-| reqwest（rustls）+ tokio | 下载管理器需要并发 + 取消 + 进度回调；rustls 保 musl 全静态（不引 OpenSSL）；async 染色核心库是可接受代价，FFI 边界用 runtime 句柄模式 |
+| reqwest（rustls/ring）+ tokio + futures-util | 下载管理器需要并发 + 取消 + 进度回调；reqwest 0.12 的 rustls-tls 走 ring 提供者（windows-gnu 用 GNU as 汇编、无需 nasm，避免 aws-lc-rs 的 CMake 依赖），musl 全静态可达；async 染色核心库是可接受代价，FFI 边界用 runtime 句柄模式 |
+| url | forgecdn→MCIM 回退的主机解析 |
 | sha1 + base64 | 每个下载文件 SHA1 校验；DES 输出的 base64 编码 |
 | zip + encoding_rs | 整合包解压 + GBK 中文文件名解码——**全平台单一代码路径，消灭 iconv 三分支** |
 | xz2 + tar | 自更新 tar.xz 解包 |
@@ -60,7 +61,7 @@ rust/
 
 1. **util**：file_utils / platform_utils / crypto_utils —— crypto 先行，golden 测试对照 C++ 输出。
 2. **settings + types**：读写现有 settings 格式。
-3. **下载层**：downloadmanager（SHA1 校验、断点续传、BMCLAPI/MCIM 镜像回退、CF key 遇 401/403/429 自动回退 MCIM）→ assetdownloader → modplatform。
+3. **下载层**：downloadmanager（SHA1 校验由 asset 层做"存在即跳过"——**C++ 无 HTTP Range 断点续传**；两阶段超时；**镜像回退仅 MCIM**：CF API 401/403/429 及 forgecdn 文件 CDN 最终失败均回退 `mod.mcimirror.top`，无 BMCLAPI）→ assetdownloader → modplatform。
 4. **版本与 Java**：versionmanager（装/验/修）、javamanager（系统探测、版本兼容矩阵、Adoptium 自动下载）。
 5. **启动**：launchbuilder + launcher —— 内存自动 sizing（可用内存 50%、上限 16G）、GC 档位、fcitx/ibus XIM 崩溃规避（GLFW 3.4 替换）、启动日志落盘，逐项对照移植。
 6. **认证**：offline → authlib-injector（会话加密持久化 + 启动时在线刷新）→ Microsoft OAuth（**最大单点风险，最早做 spike 验证设备码与 token 刷新全流程**）。

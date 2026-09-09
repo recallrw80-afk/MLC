@@ -14,7 +14,10 @@ workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-# reqwest / xz2 随下载层、自更新切片落地时启用（见 workspace Cargo.toml 注释）
+reqwest.workspace = true
+futures-util.workspace = true
+url.workspace = true
+# xz2 随自更新切片落地时启用（见 workspace Cargo.toml 注释）
 tokio.workspace = true
 sha1.workspace = true
 base64.workspace = true

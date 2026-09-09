@@ -28,10 +28,13 @@ indicatif = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # rustls 而非 OpenSSL：保住 musl 全静态构建。
-# 注意：reqwest(rustls→ring/aws-lc) 与 xz2(liblzma) 需要宿主 C 工具链编译 C 代码，
-# 为保证阶段 0 骨架在裸 rustup 环境可编译，这两个依赖随各自切片（下载层/自更新）落地时再启用：
-# reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
-# xz2 = "0.1"
+# rustls 而非 OpenSSL：保住 musl 全静态构建（reqwest 0.12 的 rustls-tls 走 ring 提供者，
+# windows-gnu 下用 GNU as 汇编、无需 nasm；避免 aws-lc-rs 的 CMake 依赖）
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+# bytes_stream 的 Stream 扩展
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# forgecdn 回退的主机解析
+url = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util", "sync", "time"] }
 sha1 = "0.10"
 base64 = "0.22"
