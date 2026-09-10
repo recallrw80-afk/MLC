@@ -476,6 +476,147 @@ pub extern "C" fn mlc_cf_api_key_source() -> *mut c_char {
     leak_cstring(src.to_string())
 }
 
+// ---------------------------------------------------------------- Mod 平台
+
+fn platform_from_i32(v: i32) -> mlccore::download::Platform {
+    match v {
+        1 => mlccore::download::Platform::Modrinth,
+        _ => mlccore::download::Platform::CurseForge,
+    }
+}
+
+fn resource_type_from_i32(v: i32) -> mlccore::download::ResourceType {
+    use mlccore::download::ResourceType as T;
+    match v {
+        1 => T::ModPack,
+        2 => T::ResourcePack,
+        3 => T::Shader,
+        4 => T::DataPack,
+        _ => T::Mod,
+    }
+}
+
+fn mod_resource_json(r: &mlccore::download::ModResource) -> serde_json::Value {
+    json!({
+        "id": r.id,
+        "name": r.name,
+        "summary": r.summary,
+        "description": r.description,
+        "author": r.author,
+        "iconUrl": r.icon_url,
+        "websiteUrl": r.website_url,
+        "downloadCount": r.download_count,
+        "lastUpdated": r.last_updated,
+        "versions": r.versions,
+    })
+}
+
+/// 搜索 mod（阻塞至完成）。platform: 0=CF 1=Modrinth；rtype: 0=Mod 1=ModPack 2=ResourcePack 3=Shader 4=DataPack
+/// 返回 JSON 数组：[{id,name,summary,author,iconUrl,downloadCount,versions,...}]
+#[no_mangle]
+pub extern "C" fn mlc_mod_search(
+    platform: i32,
+    rtype: i32,
+    query: *const c_char,
+    page: u32,
+    page_size: u32,
+) -> *mut c_char {
+    ensure_settings();
+    let q = unsafe { cstr_to_str(query) }.unwrap_or("");
+    let plat = platform_from_i32(platform);
+    let rt = resource_type_from_i32(rtype);
+    let result = runtime().block_on(async {
+        let mp = mlccore::download::ModPlatform::shared();
+        mp.search_resources(plat, rt, q, page, page_size).await
+    });
+    let arr: Vec<_> = result
+        .unwrap_or_default()
+        .iter()
+        .map(mod_resource_json)
+        .collect();
+    leak_cstring(serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
+}
+
+/// mod 详情（阻塞）。失败返回 JSON `{"error":"..."}`。
+#[no_mangle]
+pub extern "C" fn mlc_mod_details(platform: i32, mod_id: *const c_char) -> *mut c_char {
+    ensure_settings();
+    let id = unsafe { cstr_to_str(mod_id) }.unwrap_or("");
+    let plat = platform_from_i32(platform);
+    let result = runtime().block_on(async {
+        let mp = mlccore::download::ModPlatform::shared();
+        mp.get_mod_details(plat, id).await
+    });
+    let v = match result {
+        Ok(r) => mod_resource_json(&r),
+        Err(e) => json!({"error": e}),
+    };
+    leak_cstring(v.to_string())
+}
+
+/// mod 文件列表（阻塞）。JSON 数组：[{id,displayName,fileName,downloadUrl,gameVersions,loaders,fileSize,releaseDate,sha1,isRelease}]
+#[no_mangle]
+pub extern "C" fn mlc_mod_files(platform: i32, mod_id: *const c_char) -> *mut c_char {
+    ensure_settings();
+    let id = unsafe { cstr_to_str(mod_id) }.unwrap_or("");
+    let plat = platform_from_i32(platform);
+    let result = runtime().block_on(async {
+        let mp = mlccore::download::ModPlatform::shared();
+        mp.get_mod_files(plat, id).await
+    });
+    let arr: Vec<_> = result
+        .unwrap_or_default()
+        .iter()
+        .map(|f| {
+            json!({
+                "id": f.id,
+                "displayName": f.display_name,
+                "fileName": f.file_name,
+                "downloadUrl": f.download_url,
+                "gameVersions": f.game_versions,
+                "loaders": f.loaders,
+                "fileSize": f.file_size,
+                "releaseDate": f.release_date,
+                "sha1": f.sha1,
+                "isRelease": f.is_release,
+            })
+        })
+        .collect();
+    leak_cstring(serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
+}
+
+/// 下载 mod 文件到 dest_path（阻塞）
+#[no_mangle]
+pub extern "C" fn mlc_mod_download(
+    platform: i32,
+    mod_id: *const c_char,
+    file_id: *const c_char,
+    dest_path: *const c_char,
+    on_progress: MlcProgressCallback,
+) -> bool {
+    ensure_settings();
+    let mid = unsafe { cstr_to_str(mod_id) }.unwrap_or("");
+    let fid = unsafe { cstr_to_str(file_id) }.unwrap_or("");
+    let dest = unsafe { cstr_to_str(dest_path) }.unwrap_or("");
+    let plat = platform_from_i32(platform);
+    let dest = std::path::PathBuf::from(dest);
+    emit_progress(on_progress, "Downloading mod...", 10);
+    let ok = runtime().block_on(async {
+        let mp = mlccore::download::ModPlatform::shared();
+        mp.download_mod(plat, mid, fid, &dest, None).await
+    });
+    match ok {
+        Ok(_) => {
+            emit_progress(on_progress, "Complete", 100);
+            true
+        }
+        Err(e) => {
+            emit_progress(on_progress, &e, 100);
+            false
+        }
+    }
+}
+
 // ---------------------------------------------------------------- 游戏目录
 
 /// 设置游戏目录（持久化）

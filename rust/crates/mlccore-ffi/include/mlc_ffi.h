@@ -69,6 +69,21 @@ void mlc_set_cf_api_key(const char *key);
 /* "user" | "embedded" | "none"（禁止回显 key 本体） */
 char *mlc_cf_api_key_source(void);
 
+/* ---- Mod 平台（CF/Modrinth）----
+ * platform: 0=CurseForge 1=Modrinth
+ * rtype: 0=Mod 1=ModPack 2=ResourcePack 3=Shader 4=DataPack
+ */
+
+/* JSON 数组：[{id,name,summary,author,iconUrl,downloadCount,versions,...}] */
+char *mlc_mod_search(int platform, int rtype, const char *query,
+                     unsigned int page, unsigned int page_size);
+/* JSON 对象；失败 {"error":"..."} */
+char *mlc_mod_details(int platform, const char *mod_id);
+/* JSON 数组：[{id,displayName,fileName,downloadUrl,gameVersions,loaders,fileSize,...}] */
+char *mlc_mod_files(int platform, const char *mod_id);
+bool mlc_mod_download(int platform, const char *mod_id, const char *file_id,
+                      const char *dest_path, mlc_progress_callback on_progress);
+
 /* ---- 游戏目录 ---- */
 
 bool mlc_set_folder(const char *path);
