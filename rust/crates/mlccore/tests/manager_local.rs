@@ -392,3 +392,17 @@ fn url辅助函数钉死() {
         "https://launchermeta.mojang.com/v1/packages/5.json"
     );
 }
+
+// ---------------------------------------------------------------- 外网冒烟（默认跳过）
+
+#[tokio::test]
+#[ignore = "需外网：真实 TLS/HTTPS 冒烟，cargo test -- --ignored 手动运行"]
+async fn 真实https冒烟_mojang清单() {
+    let mgr = DownloadManager::new();
+    let (code, json) = mgr
+        .download_json(version_manifest_url(), &[])
+        .await
+        .expect("TLS/HTTPS 冒烟失败：rustls/ring 路径不可用");
+    assert_eq!(code, 200);
+    assert!(json["versions"].is_array(), "manifest 应含 versions 数组");
+}

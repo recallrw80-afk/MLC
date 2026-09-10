@@ -4,6 +4,10 @@
 //! 阶段 1 的垂直切片组织；迁移期硬约束（命令表面/磁盘格式/加密字节兼容）见同文档。
 //!
 //! 公有 API 表见 [docs/rust-inventory.md](../../docs/rust-inventory.md) 表 2。
+//!
+//! 已落地：util（crypto/file/ini/platform/args + zip）、settings、download、
+//! version（含 install_version）、java、launch、auth、modpack（detect + common/回滚）。
+//! installers / pipeline / update 仍为占位；Microsoft OAuth 单独 spike。
 
 pub mod auth;
 pub mod download;
