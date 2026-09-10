@@ -565,13 +565,258 @@ pub async fn resolve_launch_login(
     create_offline_login(player_name, skin_type)
 }
 
-// ---------------------------------------------------------------- Microsoft OAuth（占位）
+// ---------------------------------------------------------------- Microsoft OAuth
 
-/// Microsoft 设备码 OAuth——最大单点风险，单独 spike 后再实现
+/// Microsoft 设备码 OAuth（Device Code Flow），对应 C++ `msauth.cpp`。
+///
+/// 流程：device code → 用户浏览器授权 → 轮询 token → XBL → XSTS → Minecraft → profile。
+/// Spike 结论：客户端 ID / 端点与 C++ 一致；解析逻辑可离线单测；完整登录走 [`login_device_code`]。
 pub mod ms {
-    /// 阶段 1 spike 前返回未实现
-    pub fn not_yet_implemented() -> &'static str {
-        "Microsoft OAuth 尚未移植（计划：设备码 + token 刷新全流程 spike）"
+    use serde_json::Value;
+
+    /// 官方 Minecraft Launcher client ID（与 C++ 一致）
+    pub const CLIENT_ID: &str = "00000000402b5328";
+    pub const DEVICE_CODE_URL: &str =
+        "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
+    pub const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+    pub const XBL_AUTH_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
+    pub const XSTS_AUTH_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
+    pub const MC_AUTH_URL: &str =
+        "https://api.minecraftservices.com/authentication/login_with_xbox";
+    pub const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
+
+    /// 设备码响应
+    #[derive(Debug, Clone, Default)]
+    pub struct DeviceCode {
+        pub user_code: String,
+        pub device_code: String,
+        pub verification_uri: String,
+        pub interval_secs: u64,
+    }
+
+    /// 解析 device code 响应
+    pub fn parse_device_code(root: &Value) -> Result<DeviceCode, String> {
+        let user_code = root.get("user_code").and_then(|v| v.as_str()).unwrap_or("");
+        let device_code = root
+            .get("device_code")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if user_code.is_empty() || device_code.is_empty() {
+            return Err("Invalid device code response".into());
+        }
+        Ok(DeviceCode {
+            user_code: user_code.to_string(),
+            device_code: device_code.to_string(),
+            verification_uri: root
+                .get("verification_uri")
+                .and_then(|v| v.as_str())
+                .unwrap_or("https://microsoft.com/link")
+                .to_string(),
+            interval_secs: root.get("interval").and_then(|v| v.as_u64()).unwrap_or(5),
+        })
+    }
+
+    /// token 轮询结果
+    #[derive(Debug, Clone)]
+    pub enum PollOutcome {
+        /// 继续轮询（authorization_pending）
+        Pending,
+        /// 限流，间隔 +5s
+        SlowDown,
+        /// 成功
+        Token(String),
+        /// 致命错误
+        Failed(String),
+    }
+
+    /// 解析 token 轮询响应（对齐 RFC 8628 / C++ 分支）
+    pub fn parse_token_poll(root: &Value) -> PollOutcome {
+        let error = root.get("error").and_then(|v| v.as_str()).unwrap_or("");
+        match error {
+            "authorization_pending" => PollOutcome::Pending,
+            "slow_down" => PollOutcome::SlowDown,
+            "" => {
+                let token = root
+                    .get("access_token")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if token.is_empty() {
+                    PollOutcome::Failed("No access token in response".into())
+                } else {
+                    PollOutcome::Token(token.to_string())
+                }
+            }
+            other => PollOutcome::Failed(other.to_string()),
+        }
+    }
+
+    /// 解析 XBL 响应 Token
+    pub fn parse_xbl_token(root: &Value) -> Result<String, String> {
+        root.get("Token")
+            .and_then(|v| v.as_str())
+            .filter(|t| !t.is_empty())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No XBL token".to_string())
+    }
+
+    /// 解析 XSTS：Token + DisplayClaims.xui[0].uhs
+    pub fn parse_xsts(root: &Value) -> Result<(String, String), String> {
+        let token = root
+            .get("Token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let user_hash = root
+            .pointer("/DisplayClaims/xui/0/uhs")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if token.is_empty() || user_hash.is_empty() {
+            return Err("No XSTS token or user hash".into());
+        }
+        Ok((token, user_hash))
+    }
+
+    /// 解析 Minecraft login_with_xbox 响应
+    pub fn parse_mc_token(root: &Value) -> Result<String, String> {
+        root.get("access_token")
+            .and_then(|v| v.as_str())
+            .filter(|t| !t.is_empty())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No Minecraft token".to_string())
+    }
+
+    /// 解析 MC profile（name + id）
+    pub fn parse_mc_profile(root: &Value) -> Result<(String, String), String> {
+        let name = root.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let id = root.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if name.is_empty() || id.is_empty() {
+            return Err("Empty profile - need to buy Minecraft?".into());
+        }
+        Ok((name.to_string(), id.to_string()))
+    }
+
+    /// 身份令牌格式：`XBL3.0 x={uhs};{xsts}`
+    pub fn identity_token(user_hash: &str, xsts: &str) -> String {
+        format!("XBL3.0 x={user_hash};{xsts}")
+    }
+
+    async fn post_form(url: &str, body: &str) -> Result<(u16, Value), String> {
+        let resp = super::auth_client()
+            .post(url)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        let root: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        Ok((status, root))
+    }
+
+    async fn post_json(url: &str, body: &Value) -> Result<(u16, Value), String> {
+        super::post_json(url, body).await
+    }
+
+    /// 完整设备码登录（阻塞轮询至成功/失败/超时）。
+    /// `on_device_code` 在拿到 user_code/URL 时调用一次。
+    pub async fn login_device_code<F>(on_device_code: F) -> Result<crate::auth::AuthLogin, String>
+    where
+        F: FnOnce(&str, &str),
+    {
+        // 1. device code
+        let form = format!("client_id={CLIENT_ID}&scope=XboxLive.signin%20offline_access");
+        let (_st, root) = post_form(DEVICE_CODE_URL, &form).await?;
+        let dc = parse_device_code(&root)?;
+        on_device_code(&dc.user_code, &dc.verification_uri);
+
+        // 2. poll token（最多约 120 轮；按 interval 或 +5）
+        let mut interval = dc.interval_secs.max(1);
+        let mut retries = 0u32;
+        let ms_token = loop {
+            retries += 1;
+            if retries > 120 {
+                return Err("Polling timed out".into());
+            }
+            let form = format!(
+                "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id={CLIENT_ID}&device_code={}",
+                dc.device_code
+            );
+            let (_st, root) = post_form(TOKEN_URL, &form).await?;
+            match parse_token_poll(&root) {
+                PollOutcome::Pending => {
+                    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+                }
+                PollOutcome::SlowDown => {
+                    interval += 5;
+                    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+                }
+                PollOutcome::Token(t) => break t,
+                PollOutcome::Failed(e) => return Err(e),
+            }
+        };
+
+        // 3. XBL
+        let body = serde_json::json!({
+            "Properties": {
+                "AuthMethod": "RPS",
+                "SiteName": "user.auth.xboxlive.com",
+                "RpsTicket": format!("d={ms_token}"),
+            },
+            "RelyingParty": "http://auth.xboxlive.com",
+            "TokenType": "JWT",
+        });
+        let (_st, root) = post_json(XBL_AUTH_URL, &body).await?;
+        let xbl = parse_xbl_token(&root)?;
+
+        // 4. XSTS
+        let body = serde_json::json!({
+            "Properties": {
+                "SandboxId": "RETAIL",
+                "UserTokens": [xbl],
+            },
+            "RelyingParty": "rp://api.minecraftservices.com/",
+            "TokenType": "JWT",
+        });
+        let (_st, root) = post_json(XSTS_AUTH_URL, &body).await?;
+        let (xsts, uhs) = parse_xsts(&root)?;
+
+        // 5. Minecraft
+        let body = serde_json::json!({
+            "identityToken": identity_token(&uhs, &xsts),
+        });
+        let (_st, root) = post_json(MC_AUTH_URL, &body).await?;
+        let mc_token = parse_mc_token(&root)?;
+
+        // 6. profile
+        let resp = super::auth_client()
+            .get(MC_PROFILE_URL)
+            .header(reqwest::header::AUTHORIZATION, format!("Bearer {mc_token}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        let root: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        if !(200..300).contains(&status) {
+            return Err(format!("Profile request failed: HTTP {status}"));
+        }
+        let (name, uuid) = parse_mc_profile(&root)?;
+
+        Ok(crate::auth::AuthLogin {
+            name,
+            uuid,
+            access_token: mc_token,
+            login_type: "Ms".into(),
+            client_token: String::new(),
+            profile_json: text,
+            server_url: String::new(),
+            error_message: String::new(),
+        })
     }
 }
 
@@ -678,5 +923,59 @@ mod tests {
         assert!(login_authlib("", "u", "p").await.is_err());
         assert!(login_authlib("https://x.example", "", "p").await.is_err());
         assert!(refresh_authlib("https://x.example", "", "").await.is_err());
+    }
+
+    #[test]
+    fn ms_oauth解析钉死() {
+        use crate::auth::ms::*;
+        use serde_json::json;
+
+        let dc = parse_device_code(&json!({
+            "user_code": "ABCD-1234",
+            "device_code": "dev-xyz",
+            "verification_uri": "https://microsoft.com/link",
+            "interval": 5
+        }))
+        .unwrap();
+        assert_eq!(dc.user_code, "ABCD-1234");
+        assert_eq!(dc.interval_secs, 5);
+        assert!(parse_device_code(&json!({"user_code": "x"})).is_err());
+
+        assert!(matches!(
+            parse_token_poll(&json!({"error": "authorization_pending"})),
+            PollOutcome::Pending
+        ));
+        assert!(matches!(
+            parse_token_poll(&json!({"error": "slow_down"})),
+            PollOutcome::SlowDown
+        ));
+        assert!(matches!(
+            parse_token_poll(&json!({"access_token": "tok"})),
+            PollOutcome::Token(_)
+        ));
+        assert!(matches!(
+            parse_token_poll(&json!({"error": "expired_token"})),
+            PollOutcome::Failed(_)
+        ));
+
+        assert_eq!(
+            parse_xbl_token(&json!({"Token": "xbl-tok"})).unwrap(),
+            "xbl-tok"
+        );
+        let (tok, uhs) = parse_xsts(&json!({
+            "Token": "xsts",
+            "DisplayClaims": {"xui": [{"uhs": "hash1"}]}
+        }))
+        .unwrap();
+        assert_eq!(tok, "xsts");
+        assert_eq!(uhs, "hash1");
+        assert_eq!(identity_token("hash1", "xsts"), "XBL3.0 x=hash1;xsts");
+        assert_eq!(
+            parse_mc_token(&json!({"access_token": "mc"})).unwrap(),
+            "mc"
+        );
+        let (n, id) = parse_mc_profile(&json!({"name": "Steve", "id": "uuid-1"})).unwrap();
+        assert_eq!((n.as_str(), id.as_str()), ("Steve", "uuid-1"));
+        assert!(parse_mc_profile(&json!({"name": ""})).is_err());
     }
 }
