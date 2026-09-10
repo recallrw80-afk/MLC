@@ -90,7 +90,6 @@ CMakeLists.txt.user*
 !README.zh-CN.md
 !CONTRIBUTING.md
 !THIRD-PARTY-NOTICES.md
-!AGENTS.md
 !/docs/
 !/docs/*.md
 .gitee-token
