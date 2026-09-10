@@ -127,6 +127,48 @@ enum CliCommand {
     },
     /// 全系统自检 / Full system self-check
     Test,
+    /// 安装本地服务端 / Install local MC server
+    ServerInstall {
+        /// MC 版本；空 = 最新正式版
+        version: Option<String>,
+        /// Forge 加载器（可接版本号）
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        forge: Option<String>,
+        /// Fabric 加载器（可接版本号）
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        fabric: Option<String>,
+        /// NeoForge 加载器（可接版本号）
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        neoforge: Option<String>,
+        /// 从实例复制 mods/config
+        #[arg(long)]
+        from: Option<String>,
+    },
+    /// 启动本地服务端 / Start local MC server
+    ServerStart {
+        /// 服务端标识（版本 或 版本-加载器-版本）
+        id: String,
+        /// 同意 Minecraft EULA
+        #[arg(long)]
+        eula: bool,
+    },
+    /// 检查并更新 / Check and update
+    Update {
+        /// 包含预发布
+        #[arg(short, long)]
+        beta: bool,
+    },
+    /// 卸载（仅 install.sh 安装副本） / Uninstall
+    Uninstall {
+        /// 保留游戏目录内容
+        #[arg(short, long)]
+        keep: bool,
+    },
+    /// 生成 GitHub Issue 预填链接 / Prefilled GitHub issue link
+    Report {
+        /// 问题描述；空则用默认标题
+        description: Vec<String>,
+    },
     /// 显示版本号 / Show version
     Version,
 }
@@ -209,6 +251,23 @@ fn run(cli: Cli) -> Result<(), String> {
         } => with_settings(|s| inpack(s, &file, rename.as_deref(), target.as_deref())),
         CliCommand::Launch { name } => block_on(launch(name.as_deref().unwrap_or(""))),
         CliCommand::Test => run_self_test(),
+        CliCommand::ServerInstall {
+            version,
+            forge,
+            fabric,
+            neoforge,
+            from,
+        } => block_on(server_install(
+            version.as_deref().unwrap_or(""),
+            forge.as_deref(),
+            fabric.as_deref(),
+            neoforge.as_deref(),
+            from.as_deref(),
+        )),
+        CliCommand::ServerStart { id, eula } => with_settings(|s| server_start(s, &id, eula)),
+        CliCommand::Update { beta } => block_on(do_update(beta)),
+        CliCommand::Uninstall { keep } => mlccore::update::uninstall(keep),
+        CliCommand::Report { description } => with_settings(|s| report(s, &description)),
     }
 }
 
@@ -551,6 +610,206 @@ async fn install_java(major: i32) -> Result<(), String> {
     Ok(())
 }
 
+async fn do_update(beta: bool) -> Result<(), String> {
+    mlccore::update::check_and_update(beta).await?;
+    Ok(())
+}
+
+async fn server_install(
+    version: &str,
+    forge: Option<&str>,
+    fabric: Option<&str>,
+    neoforge: Option<&str>,
+    from: Option<&str>,
+) -> Result<(), String> {
+    let mc = settings::with_global(|s| mc_folder(s))
+        .ok_or_else(|| "Settings not initialized".to_string())?;
+    if version.is_empty() && from.is_some() {
+        return Err(
+            "--from 需要显式版本号（如 mlc server-install 1.20.1 --forge --from xxx）".into(),
+        );
+    }
+    if version.is_empty() {
+        println!("正在下载最新版 MC 服务端 ...");
+    } else {
+        println!("正在下载 MC {version} 服务端 ...");
+    }
+
+    let (loader_type, loader_ver) = if let Some(v) = forge {
+        ("forge", v)
+    } else if let Some(v) = neoforge {
+        ("neoforge", v)
+    } else if let Some(v) = fabric {
+        ("fabric", v)
+    } else {
+        ("", "")
+    };
+
+    let dlm = mlccore::download::manager::DownloadManager::new();
+    let sid = mlccore::server::install_server(&dlm, &mc, version, loader_type, loader_ver).await?;
+
+    if let Some(inst) = from {
+        // 有 loader 时目录名可能带具体 loader 版本；sid 即实际目录名
+        if let Some(s) =
+            settings::with_global(|s| mlccore::server::copy_instance_to_server(&mc, inst, &sid, s))
+        {
+            s?;
+            println!("注意：客户端专属 mod（如 Sodium 等渲染类）会让服务端崩溃，启动失败请先删 mods/ 里的渲染/界面类 mod");
+        }
+    }
+    println!("success");
+    Ok(())
+}
+
+fn server_start(s: &mut Settings, id: &str, eula: bool) -> Result<(), String> {
+    let mc = mc_folder(s);
+    let dir = mlccore::server::server_dir(&mc, id);
+    if !dir.is_dir() {
+        return Err(format!("服务端未安装，请先 mlc server-install {id}"));
+    }
+    if !mlccore::server::eula_accepted(&dir) {
+        println!("Minecraft 最终用户许可协议: https://aka.ms/MinecraftEULA");
+        if eula {
+            mlccore::server::accept_eula(&dir)?;
+        } else {
+            return Err("请先阅读 EULA，并以 --eula 参数表示同意".into());
+        }
+    }
+    println!("正在启动服务端 {id}（控制台直通，/stop 关服）...");
+    let code = mlccore::server::start_server(&mc, id, s)?;
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(format!("服务端退出码 {code}"))
+    }
+}
+
+// ---------------------------------------------------------------- report
+
+/// RFC 3986 百分号编码（GitHub issue query 用）
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn sanitize_log_line(l: &str, home_s: &str) -> String {
+    let mut l = l.to_string();
+    if let Some(pos) = l.find("--accessToken") {
+        let head = &l[..pos];
+        let after_flag = &l[pos + "--accessToken".len()..];
+        let ws_end = after_flag
+            .char_indices()
+            .find(|(_, c)| !c.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(after_flag.len());
+        let (ws, rest2) = after_flag.split_at(ws_end);
+        let rest2 = rest2
+            .split_once(|c: char| c.is_whitespace())
+            .map(|(_, r)| r)
+            .unwrap_or("");
+        l = format!("{head}--accessToken{ws}***{rest2}");
+    }
+    if !home_s.is_empty() {
+        l = l.replace(home_s, "~");
+    }
+    l
+}
+
+fn latest_launch_log_tail(mc: &Path, max_lines: usize, max_chars: usize) -> String {
+    let logs = mc.join("logs");
+    let Ok(entries) = std::fs::read_dir(&logs) else {
+        return String::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .map(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with("mlc-launch-") && n.ends_with(".log")
+                })
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    let Some(path) = files.last() else {
+        return String::new();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let home = mlccore::util::platform::home_dir();
+    let home_s = mlccore::util::platform::normalize_path_string(&home);
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|l| sanitize_log_line(l, &home_s))
+        .collect();
+    if lines.len() > max_lines {
+        lines = lines[lines.len() - max_lines..].to_vec();
+    }
+    let mut tail = lines.join("\n");
+    if tail.len() > max_chars {
+        let cut = tail.len() - max_chars;
+        let mut start = cut;
+        while start < tail.len() && !tail.is_char_boundary(start) {
+            start += 1;
+        }
+        tail = format!("（截断）\n{}", &tail[start..]);
+    }
+    tail
+}
+
+fn build_issue_url(repo: &str, desc: &str, tail: &str) -> String {
+    let mut body = format!(
+        "{desc}\n\n**环境 / Environment**\n- MLC: {} ({})\n- OS: {}\n",
+        mlccore::GIT_DESCRIBE,
+        mlccore::GIT_COMMIT_HASH,
+        std::env::consts::OS
+    );
+    if !tail.is_empty() {
+        body.push_str(&format!(
+            "\n**最近启动日志 / Launch log (tail)**\n```\n{tail}\n```\n"
+        ));
+    }
+    let title: String = desc.chars().take(60).collect();
+    let title = if desc.chars().count() > 60 {
+        format!("{title}...")
+    } else {
+        title
+    };
+    format!(
+        "https://github.com/{repo}/issues/new?title={}&body={}",
+        percent_encode(&title),
+        percent_encode(&body)
+    )
+}
+
+fn report(s: &mut Settings, description: &[String]) -> Result<(), String> {
+    let desc = if description.is_empty() {
+        "MLC 问题反馈".to_string()
+    } else {
+        description.join(" ")
+    };
+    let repo = std::env::var("MLC_REPO").unwrap_or_else(|_| "recallrw80-afk/MLC".into());
+    let mc = mc_folder(s);
+    let mut url = build_issue_url(&repo, &desc, &latest_launch_log_tail(&mc, 40, 4000));
+    if url.len() > 7500 {
+        url = build_issue_url(&repo, &desc, &latest_launch_log_tail(&mc, 15, 1200));
+    }
+    println!("Issue 预填链接（内容已生成，提交前可再编辑）:\n{url}");
+    Ok(())
+}
+
 // ---------------------------------------------------------------- inpack
 
 fn inpack(
@@ -616,7 +875,6 @@ fn inpack(
         mlccore::modpack::PackType::CurseForge => {
             let prep = mlccore::modpack::prepare_curseforge(s, &mc, &effective, name)?;
             println!("CurseForge modpack: {}", prep.name);
-            // 无 loader 才能走完；有 loader 会回滚
             let dl = mlccore::download::AssetDownloader::new(
                 mlccore::download::manager::DownloadManager::new(),
             );

@@ -43,6 +43,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 encoding_rs = "0.8"
 tar = "0.4"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+xz2 = "0.1"
 # 密钥派生用（MD5 前 8 原始字节）；DES 块算法按 C++ 原实现逐行移植——它是自洽的
 # 非标准位序变体，标准 DES crate（如 des）与其不兼容，故不引入
 md-5 = "0.10"

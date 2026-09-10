@@ -13,3 +13,5 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 mlccore.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

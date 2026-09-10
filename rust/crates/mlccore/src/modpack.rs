@@ -1,7 +1,7 @@
 //! 整合包管线，对应 C++ `sdk/src/modpack/`：detect → common → installers → pipeline。
 //!
-//! 已覆盖：类型检测、`.incomplete` 回滚、清单解析、Compressed/Mod 本地安装。
-//! Forge/NeoForge/Fabric loader 安装器尚未移植（有 loader 时导入明确失败并回滚）。
+//! 已覆盖：类型检测、`.incomplete` 回滚、清单解析、Compressed/Mod 本地安装、
+//! 以及经 `crate::installer` 的 Forge/NeoForge/Fabric 安装。
 
 use std::path::{Path, PathBuf};
 
@@ -398,13 +398,14 @@ pub fn write_setup_ini(
     std::fs::write(dir.join("Setup.ini"), body)
 }
 
-/// 实例应记录的版本 json 名（实例内版本文件夹优先）
+/// 实例应记录的版本 json 名（对齐 resolveInstanceVersionName）
 pub fn resolve_instance_version_name(
     final_dir: &Path,
     mc_version: &str,
     loader_type: &str,
     loader_ver: &str,
 ) -> String {
+    // 实例内版本文件夹优先
     let vd = final_dir.join("versions");
     if let Ok(entries) = std::fs::read_dir(&vd) {
         for entry in entries.flatten() {
@@ -417,11 +418,49 @@ pub fn resolve_instance_version_name(
             }
         }
     }
-    let _ = (loader_type, loader_ver);
-    if !mc_version.is_empty() {
-        return extract_vanilla_version(mc_version);
+    if mc_version.is_empty() {
+        return String::new();
     }
-    String::new()
+    let vanilla = extract_vanilla_version(mc_version);
+    // 在 mc 根 versions/ 里按 loader 前缀找（final_dir = mc/instances/<id>，根是其祖父）
+    // 更稳妥：从 final_dir 向上找 mc 根
+    let mc_root = final_dir
+        .parent() // instances
+        .and_then(|p| p.parent()) // mc root
+        .map(|p| p.to_path_buf());
+    if let Some(root) = mc_root {
+        let prefix = match loader_type {
+            "forge" => format!("{vanilla}-forge-"),
+            "neoforge" => "neoforge-".to_string(),
+            "fabric" => "fabric-loader-".to_string(),
+            _ => format!("{vanilla}-"),
+        };
+        if let Ok(entries) = std::fs::read_dir(root.join("versions")) {
+            let mut fallback = String::new();
+            for entry in entries.flatten() {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let dn = entry.file_name().to_string_lossy().to_string();
+                if !dn.starts_with(&prefix) {
+                    continue;
+                }
+                if !entry.path().join(format!("{dn}.json")).exists() {
+                    continue;
+                }
+                if !loader_ver.is_empty() && dn.contains(loader_ver) {
+                    return dn;
+                }
+                if fallback.is_empty() {
+                    fallback = dn;
+                }
+            }
+            if !fallback.is_empty() {
+                return fallback;
+            }
+        }
+    }
+    vanilla
 }
 
 /// 解析 CurseForge manifest.json → (mc, name, forge, neo, fabric, mods)
@@ -781,7 +820,7 @@ pub struct FinalizeRequest<'a> {
     pub mods: &'a [ModDownloadEntry],
 }
 
-/// 下载管线。有 loader 时明确失败并整体回滚（loader 安装器尚未移植）。
+/// 下载管线。顺序：MC 本体 → modloader → mods → finalize。任一步失败整体回滚。
 pub async fn download_and_finalize(
     settings: &mut Settings,
     mc_folder: &Path,
@@ -814,19 +853,55 @@ pub async fn download_and_finalize(
         _ => "",
     };
 
-    if !loader_type.is_empty() {
-        cleanup_on_error(settings, mc_folder, final_dir);
-        return Err(format!(
-            "modloader ({loader_type}) 安装尚未移植，导入已回滚"
-        ));
-    }
-
     if !mc_version.is_empty() {
         let vanilla = extract_vanilla_version(mc_version);
         if let Err(e) = crate::version::install_version(mc_folder, &vanilla, downloader, None).await
         {
             cleanup_on_error(settings, mc_folder, final_dir);
             return Err(format!("Download Minecraft failed: {e}"));
+        }
+    }
+
+    // modloader
+    if !loader_type.is_empty() {
+        let vanilla = extract_vanilla_version(mc_version);
+        if vanilla.is_empty() {
+            cleanup_on_error(settings, mc_folder, final_dir);
+            return Err("缺少 MC 版本，无法安装 modloader".into());
+        }
+        let javas = crate::java::scan_system_java(mc_folder);
+        let probe = crate::version::McVersion {
+            is_valid: true,
+            vanilla_version: crate::version::McVersionNumber::parse(&vanilla),
+            ..Default::default()
+        };
+        let java = crate::java::select_java_for_version(&javas, &probe)
+            .or_else(|| javas.first().cloned())
+            .ok_or_else(|| {
+                cleanup_on_error(settings, mc_folder, final_dir);
+                "No Java runtime found for modloader install".to_string()
+            });
+        let java = match java {
+            Ok(j) => j,
+            Err(e) => return Err(e),
+        };
+        if java.path_java.is_empty() {
+            cleanup_on_error(settings, mc_folder, final_dir);
+            return Err("No Java runtime found for modloader install".into());
+        }
+        tracing::info!("Installing {loader_type} {loader_ver} on MC {vanilla}...");
+        if let Err(e) = crate::installer::install_loader(
+            downloader.manager(),
+            loader_type,
+            mc_folder,
+            &vanilla,
+            loader_ver,
+            &java.path_java,
+        )
+        .await
+        {
+            cleanup_on_error(settings, mc_folder, final_dir);
+            return Err(format!("Install modloader failed: {e}"));
         }
     }
 
@@ -1071,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn 有loader时管线明确失败并回滚() {
+    fn 有loader但缺mc版本时回滚() {
         let mut s = temp_settings("loader-fail");
         let mc = mc_of(&s);
         let (final_dir, name) = begin_install(&mut s, &mc, "带Forge的包", "").unwrap();
@@ -1090,7 +1165,7 @@ mod tests {
             FinalizeRequest {
                 final_dir: &final_dir,
                 name: &name,
-                mc_version: "1.20.1",
+                mc_version: "",
                 forge_ver: "47.2.0",
                 neo_ver: "",
                 fabric_ver: "",
@@ -1098,7 +1173,7 @@ mod tests {
             },
         ));
         assert!(r.is_err());
-        assert!(r.unwrap_err().contains("尚未移植"));
+        assert!(r.unwrap_err().contains("缺少 MC 版本"));
         assert!(!final_dir.exists());
         assert!(s.dir_for_display_name("带Forge的包").is_none());
     }

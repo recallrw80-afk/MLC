@@ -5,16 +5,20 @@
 //!
 //! 公有 API 表见 [docs/rust-inventory.md](../../docs/rust-inventory.md) 表 2。
 //!
-//! 已落地：util（crypto/file/zip/tar.gz/ini/platform/args）、settings、download、
-//! version（含 install/remove）、java（探测/安装）、launch、auth、
-//! modpack（detect/common/清单解析/Compressed/Mod/CF 准备）。
-//! loader 安装器与 update 仍为占位；Microsoft OAuth 单独 spike。
+//! 已落地：util（crypto/file/zip/tar.gz/tar.xz/ini/platform/args）、settings、download、
+//! version（含 install/remove）、java（探测/安装）、launch、auth、installer（forge/fabric/neoforge）、
+//! modpack（detect/common/清单解析/Compressed/Mod/CF + loader 管线）、update（更新/卸载）、
+//! server（本地开服）。Microsoft OAuth 单独 spike。
+//! CLI 已覆盖 inventory 表 1 的 30 个命令；`mlccore-ffi` 覆盖表 2 同步 + 异步 API
+//! （import/launch/server），待 GUI bridge 接线与 cbindgen 进 CMake。
 
 pub mod auth;
 pub mod download;
+pub mod installer;
 pub mod java;
 pub mod launch;
 pub mod modpack;
+pub mod server;
 pub mod settings;
 pub mod update;
 pub mod util;

@@ -173,12 +173,23 @@ pub fn copy_dir(src: &Path, dst: &Path) -> bool {
     true
 }
 
-/// 解压 tar.gz（对齐 FileUtils::extractTarGz；Adoptium JRE / 自更新）
+/// 解压 tar.gz（对齐 FileUtils::extractTarGz；Adoptium JRE）
 pub fn extract_tar_gz(archive_path: &Path, dest_dir: &Path) -> Result<(), String> {
     use flate2::read::GzDecoder;
     let file = std::fs::File::open(archive_path)
         .map_err(|e| format!("打开失败 {}: {e}", archive_path.display()))?;
-    let dec = GzDecoder::new(file);
+    unpack_tar(GzDecoder::new(file), dest_dir)
+}
+
+/// 解压 tar.xz（自更新发布包）
+pub fn extract_tar_xz(archive_path: &Path, dest_dir: &Path) -> Result<(), String> {
+    use xz2::read::XzDecoder;
+    let file = std::fs::File::open(archive_path)
+        .map_err(|e| format!("打开失败 {}: {e}", archive_path.display()))?;
+    unpack_tar(XzDecoder::new(file), dest_dir)
+}
+
+fn unpack_tar(dec: impl Read, dest_dir: &Path) -> Result<(), String> {
     let mut archive = tar::Archive::new(dec);
     let _ = std::fs::create_dir_all(dest_dir);
     // zip-slip 同类防护：拒绝 .. 穿越
