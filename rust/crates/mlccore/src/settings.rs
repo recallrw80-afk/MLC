@@ -339,7 +339,10 @@ mod tests {
     use super::*;
 
     fn temp_settings(tag: &str) -> Settings {
-        let dir = std::env::temp_dir().join(format!("mlc-test-{}-{tag}", std::process::id()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("mlc-test-{}-{tag}-{n}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let mut s = Settings::load(&dir.join("MLC.ini"));
         s.init_defaults();

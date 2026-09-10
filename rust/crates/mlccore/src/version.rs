@@ -380,6 +380,36 @@ pub fn load_version(mc_folder: &Path, version_id: &str) -> McVersion {
     parse_version_json(mc_folder, &json_path)
 }
 
+/// 删除实例（对齐 removeInstance）：先清 INI 映射再删目录
+pub fn remove_instance(settings: &mut Settings, mc_folder: &Path, name: &str) -> bool {
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return false;
+    }
+    let mapped = settings
+        .dir_for_display_name(name)
+        .filter(|d| !d.is_empty());
+    match mapped {
+        Some(dir_name) => {
+            settings.remove_instance_dir(&dir_name);
+            let dir = join_under(mc_folder, &format!("instances/{dir_name}"));
+            if !dir.exists() {
+                // 映射已清理；目录已被手动删掉也视为成功
+                return true;
+            }
+            crate::util::file::remove_tree(&dir)
+        }
+        None => {
+            // 回退：显示名直接当目录名
+            let dir = join_under(mc_folder, &format!("instances/{name}"));
+            if !dir.exists() {
+                return false;
+            }
+            settings.remove_instance_dir(name);
+            crate::util::file::remove_tree(&dir)
+        }
+    }
+}
+
 /// 解析 version json 文件（对齐 parseVersionJson(path)）
 pub fn parse_version_json(mc_folder: &Path, json_path: &Path) -> McVersion {
     let mut ver = McVersion::default();

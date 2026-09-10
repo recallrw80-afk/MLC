@@ -173,6 +173,31 @@ pub fn copy_dir(src: &Path, dst: &Path) -> bool {
     true
 }
 
+/// 解压 tar.gz（对齐 FileUtils::extractTarGz；Adoptium JRE / 自更新）
+pub fn extract_tar_gz(archive_path: &Path, dest_dir: &Path) -> Result<(), String> {
+    use flate2::read::GzDecoder;
+    let file = std::fs::File::open(archive_path)
+        .map_err(|e| format!("打开失败 {}: {e}", archive_path.display()))?;
+    let dec = GzDecoder::new(file);
+    let mut archive = tar::Archive::new(dec);
+    let _ = std::fs::create_dir_all(dest_dir);
+    // zip-slip 同类防护：拒绝 .. 穿越
+    archive
+        .entries()
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter_map(|mut e| {
+            let path = e.path().ok()?.into_owned();
+            let unsafe_path = path.components().any(|c| matches!(c, Component::ParentDir));
+            if unsafe_path {
+                return Some(Err(format!("skip unsafe entry: {}", path.display())));
+            }
+            Some(e.unpack_in(dest_dir).map_err(|e| e.to_string()).map(|_| ()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(())
+}
+
 /// 文件 SHA1（小写十六进制）与期望值比对（大小写不敏感，对齐 QCryptographicHash）
 pub fn verify_sha1(path: &Path, expected: &str) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {

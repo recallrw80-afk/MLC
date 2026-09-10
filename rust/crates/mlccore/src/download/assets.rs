@@ -74,6 +74,11 @@ impl AssetDownloader {
         self
     }
 
+    /// 暴露底层下载引擎（整合包管线直接 URL 下载用）
+    pub fn manager(&self) -> &DownloadManager {
+        &self.manager
+    }
+
     fn stage(&self, s: Stage) {
         if let Some(cb) = &self.on_stage {
             cb(s);

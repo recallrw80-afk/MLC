@@ -5,9 +5,10 @@
 //!
 //! 公有 API 表见 [docs/rust-inventory.md](../../docs/rust-inventory.md) 表 2。
 //!
-//! 已落地：util（crypto/file/ini/platform/args + zip）、settings、download、
-//! version（含 install_version）、java、launch、auth、modpack（detect + common/回滚）。
-//! installers / pipeline / update 仍为占位；Microsoft OAuth 单独 spike。
+//! 已落地：util（crypto/file/zip/tar.gz/ini/platform/args）、settings、download、
+//! version（含 install/remove）、java（探测/安装）、launch、auth、
+//! modpack（detect/common/清单解析/Compressed/Mod/CF 准备）。
+//! loader 安装器与 update 仍为占位；Microsoft OAuth 单独 spike。
 
 pub mod auth;
 pub mod download;

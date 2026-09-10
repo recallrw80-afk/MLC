@@ -562,6 +562,41 @@ pub fn adoptium_download_url(major_version: i32) -> Option<String> {
     ))
 }
 
+/// 安装 Adoptium JRE 到 {mcFolder}/javas/（对齐 installJavaRuntime）
+/// major≤0 按 8 处理；返回探测到的 java 路径列表长度（0 表示解压后未找到 java）
+pub async fn install_java_runtime(
+    mc_folder: &Path,
+    major: i32,
+    downloader: &crate::download::manager::DownloadManager,
+) -> Result<usize, String> {
+    let major = if major <= 0 { 8 } else { major };
+    let url = adoptium_download_url(major).ok_or("不支持的平台")?;
+    let is_windows = cfg!(target_os = "windows");
+    let ext = if is_windows { "zip" } else { "tar.gz" };
+    let tmp_dir = mc_folder.join("tmp");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let tmp_file = tmp_dir.join(format!("jre-{major}.{ext}"));
+
+    tracing::info!("下载 JRE {major}: {url}");
+    downloader
+        .download_file(&url, &tmp_file, None)
+        .await
+        .map_err(|e| format!("JRE 下载失败: {url}: {e}"))?;
+
+    let javas_dir = mc_folder.join("javas");
+    std::fs::create_dir_all(&javas_dir).map_err(|e| e.to_string())?;
+    let extract_ok = if is_windows {
+        crate::util::file::extract_zip(&tmp_file, &javas_dir).map(|_| ())
+    } else {
+        crate::util::file::extract_tar_gz(&tmp_file, &javas_dir)
+    };
+    let _ = std::fs::remove_file(&tmp_file);
+    extract_ok.map_err(|e| format!("JRE 解压失败: {e}"))?;
+
+    let list = scan_system_java(mc_folder);
+    Ok(list.len())
+}
+
 // ---------------------------------------------------------------- 测试
 
 #[cfg(test)]

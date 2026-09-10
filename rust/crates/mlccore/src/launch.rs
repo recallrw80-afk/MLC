@@ -703,7 +703,10 @@ mod tests {
     }
 
     fn temp_settings() -> Settings {
-        let dir = std::env::temp_dir().join(format!("mlc-launch-{}", std::process::id()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("mlc-launch-{}-{n}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         Settings::load(&dir.join("MLC.ini"))
     }

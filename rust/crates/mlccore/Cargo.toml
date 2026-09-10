@@ -24,6 +24,7 @@ base64.workspace = true
 zip.workspace = true
 encoding_rs.workspace = true
 tar.workspace = true
+flate2.workspace = true
 md-5.workspace = true
 sysinfo.workspace = true
 tracing.workspace = true
