@@ -11,6 +11,8 @@ use clap::{Parser, Subcommand};
 use mlccore::settings::{self, Settings};
 use mlccore::util::platform;
 
+mod tui;
+
 // ---------------------------------------------------------------- CLI
 
 #[derive(Parser)]
@@ -39,8 +41,8 @@ enum CliCommand {
     McList,
     /// 删除整合包实例 / Remove an instance
     ListRm {
-        /// 实例显示名
-        name: String,
+        /// 实例显示名；空且非 --all 时弹出选择器
+        name: Option<String>,
         /// 删除全部实例
         #[arg(long)]
         all: bool,
@@ -77,20 +79,27 @@ enum CliCommand {
     PlayerList,
     /// 添加离线玩家 / Add offline player
     PlayerAdd {
-        name: String,
+        /// 空则交互向导
+        name: Option<String>,
         #[arg(long, default_value = "")]
         avatar: String,
         #[arg(long, default_value = "default")]
         skin: String,
     },
     /// 删除玩家 / Remove player
-    PlayerRm { uuid: String },
+    PlayerRm {
+        /// 空则选择器 + 确认
+        uuid: Option<String>,
+    },
     /// 选择当前玩家 / Select player
-    PlayerSelect { uuid: String },
+    PlayerSelect {
+        /// 空则选择器
+        uuid: Option<String>,
+    },
     /// 编辑玩家档案 / Edit player profile
     PlayerEdit {
-        /// 原 UUID
-        uuid: String,
+        /// 原 UUID；空则选择器 + 向导
+        uuid: Option<String>,
         #[arg(long, default_value = "")]
         name: String,
         #[arg(long, default_value = "")]
@@ -103,9 +112,10 @@ enum CliCommand {
     },
     /// Authlib 外置登录 / Authlib-injector login
     Login {
-        server: String,
-        username: String,
-        /// 密码（不传则从 stdin 读一行）
+        /// 空则交互向导
+        server: Option<String>,
+        username: Option<String>,
+        /// 密码（不传则掩码输入）
         password: Option<String>,
     },
     /// 退出外置登录 / Logout authlib
@@ -213,7 +223,9 @@ fn run(cli: Cli) -> Result<(), String> {
         }
         CliCommand::List => with_settings(list_instances),
         CliCommand::McList => with_settings(list_mc_versions),
-        CliCommand::ListRm { name, all } => with_settings(|s| list_rm(s, &name, all)),
+        CliCommand::ListRm { name, all } => {
+            with_settings(|s| list_rm(s, name.as_deref().unwrap_or(""), all))
+        }
         CliCommand::Mods { name } => with_settings(|s| list_mods(s, &name)),
         CliCommand::McInstall { version } => block_on(install_mc(version.as_deref().unwrap_or(""))),
         CliCommand::JavaInstall { major } => block_on(install_java(major)),
@@ -227,22 +239,39 @@ fn run(cli: Cli) -> Result<(), String> {
         }
         CliCommand::PlayerList => with_settings(player_list),
         CliCommand::PlayerAdd { name, avatar, skin } => {
-            with_settings(|s| player_add(s, &name, &avatar, &skin))
+            with_settings(|s| player_add(s, name.as_deref().unwrap_or(""), &avatar, &skin))
         }
-        CliCommand::PlayerRm { uuid } => with_settings(|s| player_rm(s, &uuid)),
-        CliCommand::PlayerSelect { uuid } => with_settings(|s| player_select(s, &uuid)),
+        CliCommand::PlayerRm { uuid } => {
+            with_settings(|s| player_rm(s, uuid.as_deref().unwrap_or("")))
+        }
+        CliCommand::PlayerSelect { uuid } => {
+            with_settings(|s| player_select(s, uuid.as_deref().unwrap_or("")))
+        }
         CliCommand::PlayerEdit {
             uuid,
             name,
             avatar,
             skin,
             new_uuid,
-        } => with_settings(|s| player_edit(s, &uuid, &name, &avatar, &skin, &new_uuid)),
+        } => with_settings(|s| {
+            player_edit(
+                s,
+                uuid.as_deref().unwrap_or(""),
+                &name,
+                &avatar,
+                &skin,
+                &new_uuid,
+            )
+        }),
         CliCommand::Login {
             server,
             username,
             password,
-        } => block_on(login(server, username, password)),
+        } => block_on(login(
+            server.unwrap_or_default(),
+            username.unwrap_or_default(),
+            password,
+        )),
         CliCommand::Logout => with_settings(logout),
         CliCommand::Inpack {
             file,
@@ -334,10 +363,29 @@ fn list_rm(s: &mut Settings, name: &str, all: bool) -> Result<(), String> {
         println!("共删除 {n} 个实例");
         return Ok(());
     }
-    if name.is_empty() {
-        return Err("用法: mlc list-rm <名称>  或  mlc list-rm --all".into());
+    let name = if name.is_empty() {
+        if !tui::is_tty() {
+            return Err("用法: mlc list-rm <名称>  或  mlc list-rm --all".into());
+        }
+        let list: Vec<String> = mlccore::version::list_instances(s, &mc)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        if list.is_empty() {
+            return Err("（无实例）".into());
+        }
+        match tui::select("选择要删除的实例", &list) {
+            Some(n) => n,
+            None => return Err("已取消".into()),
+        }
+    } else {
+        name.to_string()
+    };
+    // 交互路径二次确认；命令行带名字且非 TTY 时直接删（脚本友好）
+    if tui::is_tty() && !tui::confirm(&format!("确定删除 {name} 吗"), false).unwrap_or(false) {
+        return Err("已取消".into());
     }
-    if mlccore::version::remove_instance(s, &mc, name) {
+    if mlccore::version::remove_instance(s, &mc, &name) {
         println!("已删除: {name}");
         Ok(())
     } else {
@@ -500,15 +548,66 @@ fn player_list(s: &mut Settings) -> Result<(), String> {
 
 fn player_add(s: &mut Settings, name: &str, avatar: &str, skin: &str) -> Result<(), String> {
     if name.trim().is_empty() {
-        return Err("玩家名不能为空".into());
+        if !tui::is_tty() {
+            return Err("玩家名不能为空".into());
+        }
+        let n = tui::input("玩家名字", "", "").ok_or("已取消")?;
+        let skins = vec!["default".into(), "slim".into(), "wide".into()];
+        let sk = tui::select("皮肤类型", &skins).unwrap_or_else(|| "default".into());
+        let a = tui::input("头像路径", "", "").unwrap_or_default();
+        let mut cu = String::new();
+        if tui::confirm("需要高级配置吗", false).unwrap_or(false) {
+            cu = tui::input("自定义 UUID", "", "").unwrap_or_default();
+        }
+        let p = mlccore::auth::add_player(s, n.trim(), &a, &sk, &cu);
+        println!("已添加玩家: {}  {}", p.uuid, p.name);
+        return Ok(());
     }
     let p = mlccore::auth::add_player(s, name.trim(), avatar, skin, "");
     println!("已添加玩家: {}  {}", p.uuid, p.name);
     Ok(())
 }
 
+fn pick_player(s: &Settings, title: &str) -> Result<String, String> {
+    if !tui::is_tty() {
+        return Err("需要指定 UUID（非交互模式）".into());
+    }
+    let players = mlccore::auth::list_players(s);
+    if players.is_empty() {
+        return Err("（无玩家）".into());
+    }
+    let items: Vec<String> = players
+        .iter()
+        .map(|p| format!("{}  {}", p.uuid, p.name))
+        .collect();
+    let pick = tui::select(title, &items).ok_or("已取消")?;
+    players
+        .iter()
+        .find(|p| {
+            let label = format!("{}  {}", p.uuid, p.name);
+            label == pick
+        })
+        .map(|p| p.uuid.clone())
+        .ok_or_else(|| "选择失败".into())
+}
+
 fn player_rm(s: &mut Settings, uuid: &str) -> Result<(), String> {
-    if mlccore::auth::remove_player(s, uuid) {
+    let uuid = if uuid.is_empty() {
+        pick_player(s, "选择要删除的玩家")?
+    } else {
+        uuid.to_string()
+    };
+    if tui::is_tty() && !tui::confirm(&format!("确定删除 {uuid} 吗"), false).unwrap_or(false) {
+        return Err("已取消".into());
+    }
+    if mlccore::auth::remove_player(s, &uuid) {
+        // 删除选中玩家后自动选中剩余首个（对齐 C++ GUI 语义）
+        if s.selected_player().unwrap_or_default().is_empty() {
+            let rest = mlccore::auth::list_players(s);
+            if let Some(first) = rest.first() {
+                mlccore::auth::select_player(s, &first.uuid);
+            }
+        }
         println!("已删除玩家 {uuid}");
         Ok(())
     } else {
@@ -517,7 +616,12 @@ fn player_rm(s: &mut Settings, uuid: &str) -> Result<(), String> {
 }
 
 fn player_select(s: &mut Settings, uuid: &str) -> Result<(), String> {
-    if mlccore::auth::select_player(s, uuid) {
+    let uuid = if uuid.is_empty() {
+        pick_player(s, "选择当前玩家")?
+    } else {
+        uuid.to_string()
+    };
+    if mlccore::auth::select_player(s, &uuid) {
         println!("当前玩家: {uuid}");
         Ok(())
     } else {
@@ -533,24 +637,55 @@ fn player_edit(
     skin: &str,
     new_uuid: &str,
 ) -> Result<(), String> {
-    let cur_name = s.get_profile(uuid, "Name").unwrap_or_default();
-    let cur_avatar = s.get_profile(uuid, "Avatar").unwrap_or_default();
-    let cur_skin = s
-        .get_profile(uuid, "SkinType")
-        .unwrap_or_else(|| "slim".into());
-    let n = if name.is_empty() { &cur_name } else { name };
-    let a = if avatar.is_empty() {
-        &cur_avatar
+    let uuid = if uuid.is_empty() {
+        pick_player(s, "选择要修改的玩家")?
     } else {
-        avatar
-    };
-    let sk = if skin.is_empty() { &cur_skin } else { skin };
-    let target = if new_uuid.is_empty() {
         uuid.to_string()
-    } else {
-        new_uuid.to_string()
     };
-    if mlccore::auth::update_player(s, uuid, n, a, sk, &target) {
+    let cur_name = s.get_profile(&uuid, "Name").unwrap_or_default();
+    let cur_avatar = s.get_profile(&uuid, "Avatar").unwrap_or_default();
+    let cur_skin = s
+        .get_profile(&uuid, "SkinType")
+        .unwrap_or_else(|| "slim".into());
+
+    let (n, a, sk, nu) = if tui::is_tty()
+        && (name.is_empty() && avatar.is_empty() && skin.is_empty() && new_uuid.is_empty())
+    {
+        // 向导：回车保留原值
+        let n = tui::input("玩家名字", &cur_name, "").unwrap_or(cur_name.clone());
+        let skins = vec![
+            cur_skin.clone(),
+            "default".into(),
+            "slim".into(),
+            "wide".into(),
+        ];
+        let sk = tui::select("皮肤类型", &skins).unwrap_or(cur_skin.clone());
+        let a = tui::input("头像路径", &cur_avatar, "").unwrap_or(cur_avatar.clone());
+        let nu = tui::input("新 UUID（回车保留）", "", "").unwrap_or_default();
+        (n, a, sk, nu)
+    } else {
+        (
+            if name.is_empty() {
+                cur_name.clone()
+            } else {
+                name.to_string()
+            },
+            if avatar.is_empty() {
+                cur_avatar.clone()
+            } else {
+                avatar.to_string()
+            },
+            if skin.is_empty() {
+                cur_skin.clone()
+            } else {
+                skin.to_string()
+            },
+            new_uuid.to_string(),
+        )
+    };
+
+    let target = if nu.is_empty() { uuid.clone() } else { nu };
+    if mlccore::auth::update_player(s, &uuid, &n, &a, &sk, &target) {
         println!("已更新玩家 {uuid} → {n}");
         Ok(())
     } else {
@@ -561,20 +696,37 @@ fn player_edit(
 // ---------------------------------------------------------------- 登录
 
 async fn login(server: String, username: String, password: Option<String>) -> Result<(), String> {
-    let password = match password {
-        Some(p) => p,
-        None => {
-            eprint!("Password: ");
-            use std::io::Write;
-            std::io::stderr().flush().ok();
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .map_err(|e| e.to_string())?;
-            line.trim_end_matches(['\n', '\r']).to_string()
+    let (server, username, password) = if server.is_empty() || username.is_empty() {
+        if !tui::is_tty() {
+            return Err("用法: mlc login <服务器> <用户名> [密码]".into());
         }
+        let server = if server.is_empty() {
+            tui::input(
+                "外置登录服务器",
+                "",
+                "如 https://littleskin.cn/api/yggdrasil",
+            )
+            .ok_or("已取消")?
+        } else {
+            server
+        };
+        let username = if username.is_empty() {
+            tui::input("邮箱 / 用户名", "", "必填").ok_or("已取消")?
+        } else {
+            username
+        };
+        let password = password.unwrap_or_else(|| tui::password("密码").unwrap_or_default());
+        (server, username, password)
+    } else {
+        let password = password.unwrap_or_else(|| {
+            if tui::is_tty() {
+                tui::password("密码").unwrap_or_default()
+            } else {
+                String::new()
+            }
+        });
+        (server, username, password)
     };
-    // async 期间不能持有 Settings 锁：先完成网络，再短锁写盘
     let login = mlccore::auth::login_authlib(&server, &username, &password).await?;
     settings::with_global(|s| {
         mlccore::auth::persist_authlib_login(s, &login);
@@ -669,11 +821,12 @@ fn server_start(s: &mut Settings, id: &str, eula: bool) -> Result<(), String> {
     }
     if !mlccore::server::eula_accepted(&dir) {
         println!("Minecraft 最终用户许可协议: https://aka.ms/MinecraftEULA");
-        if eula {
-            mlccore::server::accept_eula(&dir)?;
-        } else {
+        let yes =
+            eula || (tui::is_tty() && tui::confirm("我已阅读并同意 EULA", false).unwrap_or(false));
+        if !yes {
             return Err("请先阅读 EULA，并以 --eula 参数表示同意".into());
         }
+        mlccore::server::accept_eula(&dir)?;
     }
     println!("正在启动服务端 {id}（控制台直通，/stop 关服）...");
     let code = mlccore::server::start_server(&mc, id, s)?;
@@ -796,7 +949,11 @@ fn build_issue_url(repo: &str, desc: &str, tail: &str) -> String {
 
 fn report(s: &mut Settings, description: &[String]) -> Result<(), String> {
     let desc = if description.is_empty() {
-        "MLC 问题反馈".to_string()
+        if tui::is_tty() {
+            tui::input("用一句话描述问题", "", "").unwrap_or_else(|| "MLC 问题反馈".into())
+        } else {
+            "MLC 问题反馈".to_string()
+        }
     } else {
         description.join(" ")
     };
@@ -915,6 +1072,26 @@ fn inpack(
 // ---------------------------------------------------------------- launch
 
 async fn launch(name: &str) -> Result<(), String> {
+    // 无参且 TTY：实例选择器
+    let name = if name.is_empty() && tui::is_tty() {
+        let list = settings::with_global(|s| {
+            let mc = mc_folder(s);
+            mlccore::version::list_instances(s, &mc)
+                .into_iter()
+                .map(|i| i.id)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+        if list.is_empty() {
+            String::new()
+        } else {
+            tui::select("选择要启动的实例", &list).ok_or("已取消")?
+        }
+    } else {
+        name.to_string()
+    };
+    let name = name.as_str();
+
     let (mc, player, skin) = settings::with_global(|s| {
         let mc = mc_folder(s);
         let players = mlccore::auth::list_players(s);
