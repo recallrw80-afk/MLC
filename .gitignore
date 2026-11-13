@@ -92,6 +92,7 @@ CMakeLists.txt.user*
 !THIRD-PARTY-NOTICES.md
 !/docs/
 !/docs/*.md
+/docs/PCL-Download-Architecture.md
 .gitee-token
 cmake-build-debug/
 cmake-build-release/
