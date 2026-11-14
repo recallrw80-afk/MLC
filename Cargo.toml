@@ -19,39 +19,42 @@ repository = "https://github.com/recallrw80-afk/MLC"
 mlccore = { path = "crates/mlccore" }
 
 # CLI
-clap = { version = "4", features = ["derive"] }
-inquire = "0.7"
-dialoguer = "0.11"
-indicatif = "0.17"
+clap = { version = "=4.6.7", features = ["derive"] }
+inquire = "=0.9.4"
+dialoguer = "=0.12"
+indicatif = "0.18"
 
 # 核心
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-# rustls 而非 OpenSSL：保住 musl 全静态构建。
-# rustls 而非 OpenSSL：保住 musl 全静态构建（reqwest 0.12 的 rustls-tls 走 ring 提供者，
-# windows-gnu 下用 GNU as 汇编、无需 nasm；避免 aws-lc-rs 的 CMake 依赖）
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde_json = "=1.0.154"
+# rustls 而非 OpenSSL：TLS 全用 Rust 实现，不依赖系统 OpenSSL。
+# 2026-11-14 升级 reqwest 0.12 → 0.13 后的 feature 变化（用户已确认选型）：
+#   - feature 名 "rustls-tls" 已不存在，改名为 "rustls"
+#   - 0.13 的 "rustls" 默认走 aws-lc-rs 提供者（需要 cmake + C 编译器，
+#     不再是 0.12 时代的 ring）。若日后要回到"无 CMake 依赖"，
+#     改用 "rustls-no-provider" + 显式安装 ring provider（需在启动处设 CryptoProvider）。
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "stream"] }
 # bytes_stream 的 Stream 扩展
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
 # forgecdn 回退的主机解析
-url = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util", "sync", "time"] }
-sha1 = "0.10"
-base64 = "0.22"
+url = "=2.5.8"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util", "sync", "time"] }
+sha1 = "=0.11.0"
+base64 = "0.23.1"
 # default-features=false 排除 bzip2-sys（需要 C 工具链）；deflate 走 flate2 纯 Rust 后端
-zip = { version = "2", default-features = false, features = ["deflate"] }
-encoding_rs = "0.8"
-tar = "0.4"
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-xz2 = "0.1"
+zip = { version = "=9.5.1", default-features = false, features = ["deflate"] }
+encoding_rs = "=0.8.44"
+tar = "=0.4.46"
+flate2 = { version = "=1.1.11", default-features = false, features = ["rust_backend"] }
+xz2 = "=0.1.7"
 # 密钥派生用（MD5 前 8 原始字节）；DES 块算法按 C++ 原实现逐行移植——它是自洽的
 # 非标准位序变体，标准 DES crate（如 des）与其不兼容，故不引入
-md-5 = "0.10"
-sysinfo = "0.30"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dirs = "5"
-which = "6"
+md-5 = "=0.11.0"
+sysinfo = "=0.40.3"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+dirs = "=7.0.0"
+which = "8.0.6"
 
 [workspace.lints.rust]
 unsafe_code = "allow" # ffi crate 必须 unsafe；不在 workspace 级禁止

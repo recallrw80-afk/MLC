@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use mlccore::util::platform;
 use mlccore::download::{rules_allow_this_platform, AssetDownloader, DownloadManager, Stage};
+use mlccore::util::platform;
 use serde_json::json;
 
 // ---------------------------------------------------------------- 辅助
@@ -226,8 +226,12 @@ fn 规则判定对齐cpp() {
     // 注意：这些断言原先硬编码 "windows"，等于假设测试只在 Windows 上跑；
     // 而 CI 在 ubuntu-latest 执行 `cargo test --workspace`，必然失败。
     // 改为按当前平台取名，断言在不同平台上都成立。
-    let this = platform::platform_name();          // "windows" / "linux" / "osx"
-    let other = if this == "windows" { "linux" } else { "windows" };
+    let this = platform::platform_name(); // "windows" / "linux" / "osx"
+    let other = if this == "windows" {
+        "linux"
+    } else {
+        "windows"
+    };
     let arch64 = "x86_64";
     let arch32 = "x86";
 

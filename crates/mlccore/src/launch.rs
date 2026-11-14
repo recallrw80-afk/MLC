@@ -83,12 +83,20 @@ pub fn auto_max_memory_mb() -> i32 {
     mb.clamp(2048, 16384) as i32
 }
 
-/// 可用物理内存 MB（sysinfo；0.30 的 available_memory 为 KiB）
+/// 可用物理内存 MB（sysinfo）
+///
+/// 版本适配记录：
+/// - sysinfo 0.30：`available_memory()` 返回 **KiB**，需再 /1024 得 MB
+/// - sysinfo 0.40：`available_memory()` 返回 **字节**（不再是 KiB），
+///   且 `System::new()` / `new_all()` 由返回 `Self` 改为返回 `Result<Self, Error>`
+///
+/// 故此处 `System::new()` 失败即返回 None（调用方回退 8192MB），
+/// 字节数按 /1024/1024 换算为 MB。
 fn available_memory_mb() -> Option<i64> {
     use sysinfo::System;
-    let mut sys = System::new();
+    let mut sys = System::new().ok()?;
     sys.refresh_memory();
-    Some(sys.available_memory() as i64 / 1024)
+    Some(sys.available_memory() as i64 / 1024 / 1024)
 }
 
 // ---------------------------------------------------------------- 规则

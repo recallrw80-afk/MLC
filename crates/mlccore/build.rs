@@ -16,10 +16,9 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     // 2026-11-14 目录交换后：Rust 已是仓库根，git 直接在当前目录执行
-    let describe = git(&["describe", "--tags", "--always"])
-        .unwrap_or_else(|| "v0.1-unknown".to_string());
-    let commit =
-        git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "0000000".into());
+    let describe =
+        git(&["describe", "--tags", "--always"]).unwrap_or_else(|| "v0.1-unknown".to_string());
+    let commit = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "0000000".into());
 
     println!("cargo:rustc-env=GIT_DESCRIBE={describe}");
     println!("cargo:rustc-env=GIT_COMMIT_HASH={commit}");

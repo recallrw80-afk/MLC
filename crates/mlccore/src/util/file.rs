@@ -214,9 +214,16 @@ pub fn verify_sha1(path: &Path, expected: &str) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
     };
+    // sha1 0.11 起不再为 hasher 实现 std::io::Write，std::io::copy 无法直写。
+    // 改为手动分块读 + update()：与 io::copy 语义等价，且不引入额外依赖。
     let mut hasher = Sha1::new();
-    if std::io::copy(&mut file, &mut hasher).is_err() {
-        return false;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match std::io::Read::read(&mut file, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(_) => return false,
+        }
     }
     let actual = hasher
         .finalize()
@@ -277,7 +284,12 @@ pub fn extract_natives_jar(jar_path: &Path, dest_dir: &Path) -> Vec<String> {
         let Ok(mut entry) = archive.by_index(i) else {
             continue;
         };
-        let name = entry.name().to_string();
+        // zip 9.x 起 entry.name() 返回 Result<Cow<str>, ZipError>（原先返回 &str）。
+        // 非法 UTF-8 / 损坏条目名直接跳过该条目（与 C++ 侧"畸形条目跳过"一致）。
+        let Ok(raw_name) = entry.name() else {
+            continue;
+        };
+        let name = raw_name.to_string();
         if !is_native_file(&name) {
             continue;
         }
