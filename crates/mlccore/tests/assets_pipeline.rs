@@ -1,5 +1,5 @@
 //! AssetDownloader 管线本地测试：自起 HTTP 服务器模拟 Mojang/CF/CDN，零外网依赖。
-//! 规则判定的 os.name/os.arch 当前固定按 windows/x86_64（测试机为 Windows x64）。
+//! 规则判定按“当前运行平台”取名（原实现硬编码 windows，导致 Linux CI 必失败）。
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use mlccore::util::platform;
 use mlccore::download::{rules_allow_this_platform, AssetDownloader, DownloadManager, Stage};
 use serde_json::json;
 
@@ -222,39 +223,49 @@ async fn 资产部分失败不致命() {
 
 #[test]
 fn 规则判定对齐cpp() {
+    // 注意：这些断言原先硬编码 "windows"，等于假设测试只在 Windows 上跑；
+    // 而 CI 在 ubuntu-latest 执行 `cargo test --workspace`，必然失败。
+    // 改为按当前平台取名，断言在不同平台上都成立。
+    let this = platform::platform_name();          // "windows" / "linux" / "osx"
+    let other = if this == "windows" { "linux" } else { "windows" };
+    let arch64 = "x86_64";
+    let arch32 = "x86";
+
     // 无 rules → 允许
     assert!(rules_allow_this_platform(&json!({"name": "x"})));
-    // 缺 action 按 allow
+    // 缺 action 按 allow（且 os 命中本平台）
     assert!(rules_allow_this_platform(
-        &json!({"rules": [{"os": {"name": "windows"}}]})
+        &json!({"rules": [{"os": {"name": this}}]})
     ));
-    // os.name 匹配 + allow
+    // os.name 命中 + allow
     assert!(rules_allow_this_platform(&json!({
-        "rules": [{"action": "allow", "os": {"name": "windows"}}]
+        "rules": [{"action": "allow", "os": {"name": this}}]
     })));
-    // os.name 不匹配 → 后面的 disallow 不影响前面已命中的 allow
-    // （C++ rulesAllowOnThisPlatform：matches 初值 true，仅覆盖不取反——
-    //  [allow windows, disallow osx] 在 windows 上 = true）
+    // os.name 是本平台 → 命中
     assert!(rules_allow_this_platform(&json!({
         "rules": [
-            {"action": "allow", "os": {"name": "windows"}},
-            {"action": "disallow", "os": {"name": "osx"}}
+            {"action": "allow", "os": {"name": this}},
+            {"action": "disallow", "os": {"name": other}}
         ]
     })));
-    // 反向：先 disallow osx（不匹配），后 allow windows（命中）→ true
+    // 反向顺序：先 disallow 别的平台（不匹配），后 allow 本平台（命中）→ true
     assert!(rules_allow_this_platform(&json!({
         "rules": [
-            {"action": "disallow", "os": {"name": "osx"}},
-            {"action": "allow", "os": {"name": "windows"}}
+            {"action": "disallow", "os": {"name": other}},
+            {"action": "allow", "os": {"name": this}}
         ]
     })));
-    // 双条件（name + arch）：x86_64 匹配
+    // 双条件（name + arch 匹配）
     assert!(rules_allow_this_platform(&json!({
-        "rules": [{"action": "allow", "os": {"name": "windows", "arch": "x86_64"}}]
+        "rules": [{"action": "allow", "os": {"name": this, "arch": arch64}}]
     })));
     // 双条件里 arch 不匹配 → 整体不匹配
     assert!(!rules_allow_this_platform(&json!({
-        "rules": [{"action": "allow", "os": {"name": "windows", "arch": "x86"}}]
+        "rules": [{"action": "allow", "os": {"name": this, "arch": arch32}}]
+    })));
+    // 只允许别的平台 → 本平台不匹配
+    assert!(!rules_allow_this_platform(&json!({
+        "rules": [{"action": "allow", "os": {"name": other}}]
     })));
 }
 

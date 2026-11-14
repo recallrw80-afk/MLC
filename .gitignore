@@ -90,9 +90,9 @@ CMakeLists.txt.user*
 !README.zh-CN.md
 !CONTRIBUTING.md
 !THIRD-PARTY-NOTICES.md
-!/docs/
-!/docs/*.md
-/docs/PCL-Download-Architecture.md
+!/cpp/docs/
+!/cpp/docs/*.md
+/cpp/docs/PCL-Download-Architecture.md
 .gitee-token
 cmake-build-debug/
 cmake-build-release/
@@ -110,4 +110,4 @@ release.sh
 mirror-gitee.sh
 
 # Rust（阶段 0+ 的 cargo workspace；Cargo.lock 需要提交，不要忽略）
-/rust/target/
+/target/

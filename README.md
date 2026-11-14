@@ -4,6 +4,21 @@
 
 A cross-platform Minecraft launcher written in C++20 / Qt 6, centered on the lightweight command-line frontend `mlc` (RSS ~4MB) — suitable for desktops, servers, and headless environments.
 
+## Repository layout (swapped 2026-11-14)
+
+The repo is now **Rust-first** (Rust lives at the root); the C++ implementation moved into `cpp/` as reference / transition code:
+
+```
+MLC/
+├── Cargo.toml crates/       # Rust workspace (main line): mlccore + mlc + mlccore-ffi
+├── README.md release.sh     # root-level files for the Rust main line
+└── cpp/                     # C++/Qt implementation (kept during migration, feature-frozen)
+    ├── sdk/ cli/ gui/       # original C++ core, CLI, QML GUI
+    └── CMakeLists.txt Makefile
+```
+
+> Building the C++ version requires `cd cpp` first; the Rust version builds from the repo root with `cargo build`.
+
 ## Features
 
 - **CLI first**: modpack import, instance management, version download, and game launch all work in a terminal; interactive pickers and wizards on TTY (create-vite style)
@@ -58,13 +73,13 @@ For hacking/custom builds. Note: locally built packages do not embed a CF key (C
 
 ```bash
 git clone https://github.com/recallrw80-afk/MLC.git
-cd MLC
+cd MLC/cpp
 make install        # build Release → zero-dependency package → install to ~/.local
 ```
 
 Requirements: Qt 6.11+ (Core/Network), CMake 3.16+, Ninja, a C++20 compiler, nlohmann-json 3.11+, ZLIB. Qt prefix defaults to `$HOME/Qt/6.11.1/gcc_64`; override with `make install QT_PREFIX=/path/to/Qt/6.x/gcc_64`.
 
-To install a package built on another machine: `bash cli/install.sh mlc-linux-<arch>.tar.xz`.
+To install a package built on another machine: `bash cpp/cli/install.sh mlc-linux-<arch>.tar.xz`.
 
 ### Update & uninstall
 
@@ -77,9 +92,10 @@ mlc uninstall -r   # uninstall but keep game folder contents
 ### Common build targets
 
 ```bash
+cd cpp              # the C++ project lives in cpp/ (the Rust main line builds from the repo root)
 make cli            # build mlc + libmlccore.so (Debug)
-make package-tar    # zero-dependency tarball at cli/dist/mlc-linux-<arch>.tar.xz
-make run            # build & launch the QML GUI (test version, binary name mlc-gui)
+make package-tar    # zero-dependency tarball at cpp/cli/dist/mlc-linux-<arch>.tar.xz
+make run            # build & launch the QML GUI (dev on hold; source-only, binary name mlc-gui)
 ```
 
 ## Quick start
@@ -96,11 +112,11 @@ mlc mc-install        # latest release
 mlc launch 1.20.1
 ```
 
-See [cli/README.md](cli/README.md) for the full command reference. Every command accepts `-h` for detailed parameter help (e.g. `mlc inpack -h`); `mlc help` lists all commands.
+See [cpp/cli/README.md](cpp/cli/README.md) for the full command reference. Every command accepts `-h` for detailed parameter help (e.g. `mlc inpack -h`); `mlc help` lists all commands.
 
 ## Docs
 
-- [cli/README.md](cli/README.md) — CLI command reference, directory layout, FAQ
+- [cpp/cli/README.md](cpp/cli/README.md) — CLI command reference, directory layout, FAQ
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development conventions and contribution guide
 
 ## Contributing

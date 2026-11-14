@@ -6,13 +6,13 @@ name: rust-ci
 on:
   push:
     branches: [main]
-    paths: ['rust/**', '.github/workflows/rust-ci.yml']
+    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rustfmt.toml', '.github/workflows/rust-ci.yml', 'cpp/**']
   pull_request:
-    paths: ['rust/**', '.github/workflows/rust-ci.yml']
+    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rustfmt.toml', '.github/workflows/rust-ci.yml', 'cpp/**']
 
 defaults:
   run:
-    working-directory: rust
+    working-directory: .
 
 jobs:
   lint-test:
@@ -24,7 +24,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: .
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -47,7 +47,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: .
           key: ${{ matrix.target }}
       # aarch64 linux 交叉：装目标架构 C 工具链（ring/aws-lc 等需要目标 cc）
       - if: matrix.cross

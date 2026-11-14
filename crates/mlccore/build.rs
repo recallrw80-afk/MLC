@@ -15,25 +15,26 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
-    // 仓库根在 rust/ 的上一级
-    let describe = git(&["-C", "..", "describe", "--tags", "--always"])
+    // 2026-11-14 目录交换后：Rust 已是仓库根，git 直接在当前目录执行
+    let describe = git(&["describe", "--tags", "--always"])
         .unwrap_or_else(|| "v0.1-unknown".to_string());
     let commit =
-        git(&["-C", "..", "rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "0000000".into());
+        git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "0000000".into());
 
     println!("cargo:rustc-env=GIT_DESCRIBE={describe}");
     println!("cargo:rustc-env=GIT_COMMIT_HASH={commit}");
     // git HEAD 变化时重跑（tag 变化靠 describe 输出变化自然触发）
-    println!("cargo:rerun-if-changed=../.git/HEAD");
-    println!("cargo:rerun-if-changed=../.git/refs");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/refs");
 
-    // CurseForge key：开发构建从 MLC/.env 嵌入（对齐 CMake 的 MLC_EMBED_CF_KEY 选项：
+    // CurseForge key：开发构建从仓库根的 .env 嵌入（对齐 CMake 的 MLC_EMBED_CF_KEY 选项：
     // 发布构建设 MLC_EMBED_CF_KEY=OFF 跳过；CI 从 Secret 注入 .env）
+    // 2026-11-14 目录交换后 .env 就在当前目录（原来是 ../.env）
     if std::env::var("MLC_EMBED_CF_KEY")
         .unwrap_or_default()
         .ne("OFF")
     {
-        if let Ok(env) = std::fs::read_to_string("../.env") {
+        if let Ok(env) = std::fs::read_to_string(".env") {
             for line in env.lines() {
                 // 兼容 MLC_CURSEFORGE_API_KEY=、LPCL_CURSEFORGE_API_KEY=（旧名）和 API_KEY= 三种写法
                 for prefix in [
@@ -49,5 +50,5 @@ fn main() {
             }
         }
     }
-    println!("cargo:rerun-if-changed=../.env");
+    println!("cargo:rerun-if-changed=.env");
 }

@@ -4,6 +4,21 @@
 
 一个用 C++20 / Qt 6 编写的跨平台 Minecraft 启动器，以轻量命令行前端 `mlc`（RSS ~4MB）为核心，适合桌面、服务器与无显示环境使用。
 
+## 目录结构（2026-11-14 交换）
+
+仓库以 **Rust 为主**（Rust 在根目录），C++ 实现收进 `cpp/` 作为参考/过渡：
+
+```
+MLC/
+├── Cargo.toml crates/       # Rust workspace（主开发线）：mlccore + mlc + mlccore-ffi
+├── README.md release.sh     # 根层与 Rust 主线相关的文件
+└── cpp/                     # C++/Qt 实现（迁移期保留，功能冻结）
+    ├── sdk/ cli/ gui/       # 原 C++ 核心、CLI、QML GUI
+    └── CMakeLists.txt Makefile
+```
+
+> 构建 C++ 版需先 `cd cpp`；Rust 版直接在根目录 `cargo build`。
+
 ## 特性
 
 - **CLI 优先**：整合包导入、实例管理、版本下载、游戏启动全部可在终端完成；TTY 下有交互式选择器与向导（create-vite 风格）
@@ -58,13 +73,13 @@ curl -fsSL https://github.com/recallrw80-afk/MLC/releases/download/v0.1.3-beta/i
 
 ```bash
 git clone https://github.com/recallrw80-afk/MLC.git
-cd MLC
+cd MLC/cpp
 make install        # 编译 Release → 零依赖打包 → 安装到本机
 ```
 
 依赖：Qt 6.11+（Core/Network）、CMake 3.16+、Ninja、C++20 编译器、nlohmann-json 3.11+、ZLIB。Qt 路径默认 `$HOME/Qt/6.11.1/gcc_64`，可用 `make install QT_PREFIX=/path/to/Qt/6.x/gcc_64` 覆盖。
 
-其他电脑编译的包拷到本机：`bash cli/install.sh mlc-linux-<arch>.tar.xz`。
+其他电脑编译的包拷到本机：`bash cpp/cli/install.sh mlc-linux-<arch>.tar.xz`。
 
 ### 更新与卸载
 
@@ -77,9 +92,10 @@ mlc uninstall -r   # 卸载但保留游戏目录内容
 ### 常用构建命令
 
 ```bash
+cd cpp              # C++ 工程在 cpp/ 下（Rust 主线在根目录用 cargo）
 make cli            # 构建 mlc + libmlccore.so（Debug）
-make package-tar    # 生成零依赖发布包 cli/dist/mlc-linux-<arch>.tar.xz
-make run            # 构建并启动 QML GUI（测试版，二进制名 mlc-gui）
+make package-tar    # 生成零依赖发布包 cpp/cli/dist/mlc-linux-<arch>.tar.xz
+make run            # 构建并启动 QML GUI（开发暂停，仅源码可用，二进制名 mlc-gui）
 ```
 
 ## 快速上手
@@ -96,11 +112,11 @@ mlc mc-install        # 最新正式版
 mlc launch 1.20.1
 ```
 
-完整命令参考见 [cli/README.md](cli/README.md)。任何命令加 `-h` 可打印该命令的参数详解（如 `mlc inpack -h`）；`mlc help` 查看命令总表。
+完整命令参考见 [cpp/cli/README.md](cpp/cli/README.md)。任何命令加 `-h` 可打印该命令的参数详解（如 `mlc inpack -h`）；`mlc help` 查看命令总表。
 
 ## 文档
 
-- [cli/README.md](cli/README.md) — CLI 命令参考、目录结构、FAQ
+- [cpp/cli/README.md](cpp/cli/README.md) — CLI 命令参考、目录结构、FAQ
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发约定与贡献指南
 
 ## 贡献

@@ -88,8 +88,8 @@ endif()
 # CurseForge API key：开发构建从 MLC/.env 嵌入（发布构建 -DMLC_EMBED_CF_KEY=OFF 跳过）
 option(MLC_EMBED_CF_KEY "Embed CurseForge API key from .env (dev builds)" ON)
 set(MLC_CF_KEY "")
-if(MLC_EMBED_CF_KEY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../.env")
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../.env" _mlc_env_lines)
+if(MLC_EMBED_CF_KEY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../.env")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../.env" _mlc_env_lines)
     foreach(_line IN LISTS _mlc_env_lines)
         # 兼容 MLC_CURSEFORGE_API_KEY=、LPCL_CURSEFORGE_API_KEY=（旧名）和 API_KEY= 三种写法
         if(_line MATCHES "^(MLC_CURSEFORGE_API_KEY|LPCL_CURSEFORGE_API_KEY|API_KEY)=(.*)$")
