@@ -34,6 +34,10 @@ int main(int argc, char *argv[]){
     app.setApplicationName("MLC");
     app.setApplicationVersion(QString::fromLatin1(APP_VERSION));
     app.setOrganizationName("MLC");
+    // Linux 桌面集成：Wayland 的 app_id 直接取这里；X11 的 WM_CLASS 无法由它改变
+    // （由 .desktop 的 StartupWMClass 反向对齐），两者配合才能让图标/窗口分组对上。
+    // 注意：必须在创建任何窗口之前设置。
+    app.setDesktopFileName(QStringLiteral("org.mlc.MinecraftLauncher"));
 
     // Print version info at startup
     qInfo() << "MLC version:" << GIT_DESCRIBE << "commit:" << GIT_COMMIT_HASH;

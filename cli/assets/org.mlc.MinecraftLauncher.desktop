@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=MLC
+GenericName=Minecraft Launcher
+Comment=MinecraftLauncherCLI — Minecraft 启动器（Qt 图形界面）
+Comment[en]=MinecraftLauncherCLI — Minecraft launcher with Qt GUI
+Exec=mlc-gui
+TryExec=mlc-gui
+Icon=org.mlc.MinecraftLauncher
+Terminal=false
+Categories=Game;
+Keywords=Minecraft;Launcher;MLC;
+StartupNotify=true
+# X11 侧：setDesktopFileName() 改不了 WM_CLASS（恒为 <可执行名>/<applicationName>），
+# 这里用 StartupWMClass 反向声明，让窗口管理器能把窗口归到本启动项。
+StartupWMClass=mlc-gui

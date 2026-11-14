@@ -92,7 +92,7 @@ mlc uninstall -r   # uninstall but keep game folder contents
 ```bash
 make cli            # build mlc + libmlccore.so (Debug)
 make package-tar    # zero-dependency tarball at cli/dist/mlc-linux-<arch>.tar.xz
-make run            # build & launch the QML GUI (test version, binary name mlc-gui)
+make run            # build & launch the QML GUI (dev on hold; source-only, binary name mlc-gui)
 ```
 
 ## Quick start
@@ -308,7 +308,13 @@ No. Official prebuilt packages embed a key (fastest, official API); source build
 `mlc set-lang zh` (persistent, one-time).
 
 **Is there a GUI?**
-The QML GUI is currently a test version sharing the same SDK as the CLI. Start it with `make run` from a dev build (binary name `mlc-gui`); release packages containing the GUI register an `mlc-gui` command.
+The QML GUI (`gui/`, binary `mlc-gui`) is **on hold** as of 2026-11-14 — focus is the CLI and SDK.
+
+- **Not shipped**: `make package-tar` only packages the command-line `mlc`; prebuilt packages contain no `mlc-gui`, so the installer does not register that command.
+- **Source still works**: developers can build and run it locally with `make run` (requires a full Qt 6.11 install).
+- All code is retained. Resuming requires solving the GUI's zero-dependency distribution first (Qt platform plugins, QML modules, etc.) — see the "GUI 开发暂停" section in the repo-root `CLAUDE.md`.
+
+For everyday use, stick to the CLI: run `mlc help` for all commands.
 
 **What happens when an import fails?**
 Any failed download stage (game files / modloader / mods) rolls back everything — no half-installed instance is left behind; just retry.

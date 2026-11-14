@@ -283,6 +283,20 @@ int handleUninstall(QStringList &args) {
         }
     }
 
+    // 2b. 删除桌面项与图标（install.sh 注册的 Linux 桌面集成文件）
+    {
+        const QString dataHome = qEnvironmentVariable("XDG_DATA_HOME",
+            QDir::homePath() + "/.local/share");
+        const QString appsDir = dataHome + "/applications";
+        const QString desktopFile = appsDir + "/org.mlc.MinecraftLauncher.desktop";
+        if (QFile::exists(desktopFile)) {
+            std::cout << _("删除桌面项: ", "Removing desktop entry: ")
+                      << desktopFile.toStdString() << std::endl;
+            QFile::remove(desktopFile);
+        }
+        QFile::remove(dataHome + "/icons/hicolor/scalable/apps/org.mlc.MinecraftLauncher.svg");
+    }
+
     // 3. 删除安装目录（Linux 下删除运行中的二进制是安全的，进程退出后 inode 回收）
     if (keepGame) {
         // -r：只删程序本体和配置，保留 mc/ 等其余内容

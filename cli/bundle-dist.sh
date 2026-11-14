@@ -52,3 +52,18 @@ cp -L "$QT_PREFIX/plugins/tls/libqopensslbackend.so" "$DIST/plugins/tls/"
 cp -L "$QT_PREFIX/plugins/tls/libqcertonlybackend.so" "$DIST/plugins/tls/"
 
 echo "bundle: 已收集 $(ls "$LIBDIR" | wc -l) 个库到 $LIBDIR"
+
+# 桌面集成文件（install.sh 会安装到 ~/.local/share/applications/ 与 icons/）
+# .desktop 的 Icon= 指向 org.mlc.MinecraftLauncher，因此图标文件名必须同名
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/assets/org.mlc.MinecraftLauncher.desktop" ]; then
+    mkdir -p "$DIST/share/applications" "$DIST/share/icons/hicolor/scalable/apps"
+    cp "$SCRIPT_DIR/assets/org.mlc.MinecraftLauncher.desktop" "$DIST/share/applications/"
+    for src in "$DIST/../gui/assets/logo.svg" "$SCRIPT_DIR/../gui/assets/logo.svg"; do
+        if [ -f "$src" ]; then
+            cp "$src" "$DIST/share/icons/hicolor/scalable/apps/org.mlc.MinecraftLauncher.svg"
+            echo "bundle: 已收集桌面文件与图标"
+            break
+        fi
+    done
+fi

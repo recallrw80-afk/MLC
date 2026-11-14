@@ -1,4 +1,4 @@
-# MLC Rust workspace — SDK(mlccore) + CLI(mlc) + GUI 用 C ABI(mlccore-ffi)
+# MLC Rust workspace — SDK(mlccore) + CLI(mlc) + GUI(mlc-gui，Reta) + C ABI(mlccore-ffi，可选)
 # 计划与硬约束见 ../docs/rust-rewrite-plan.md、../docs/rust-inventory.md
 [workspace]
 resolver = "2"

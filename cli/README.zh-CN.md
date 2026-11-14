@@ -92,7 +92,7 @@ mlc uninstall -r   # 卸载但保留游戏目录内容
 ```bash
 make cli            # 构建 mlc + libmlccore.so（Debug）
 make package-tar    # 生成零依赖发布包 cli/dist/mlc-linux-<arch>.tar.xz
-make run            # 构建并启动 QML GUI（测试版，二进制名 mlc-gui）
+make run            # 构建并启动 QML GUI（开发暂停，仅源码可用，二进制名 mlc-gui）
 ```
 
 ## 快速上手
@@ -308,7 +308,13 @@ mc/
 `mlc set-lang zh`（一次设置，永久生效）。
 
 **有图形界面吗？**
-QML GUI 目前是测试版，与 CLI 共享同一套 SDK。开发构建后用 `make run` 启动（二进制名 `mlc-gui`）；发布包如包含 GUI 会注册 `mlc-gui` 命令。
+QML GUI（`gui/`，二进制 `mlc-gui`）目前**开发暂停**（2026-11-14 决定），重心是 CLI + SDK。
+
+- **不在发布包里**：`make package-tar` 只打包命令行版 `mlc`，预编译包没有 `mlc-gui`，所以安装脚本不会注册该命令。
+- **源码仍可用**：开发者可以 `make run` 在本地构建启动（需要本机完整 Qt 6.11）。
+- 代码全部保留，恢复开发前需先解决 GUI 的零依赖分发问题（缺 Qt 平台插件、QML 模块等），详见仓库根目录 `CLAUDE.md` 的「GUI 开发暂停」一节。
+
+日常使用请走 CLI：`mlc help` 查看全部命令。
 
 **导入失败会怎样？**
 任一下载环节失败（游戏文件/Modloader/Mod）都会整体回滚，不会留下装了一半的实例，重试即可。

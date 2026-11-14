@@ -14,7 +14,19 @@
 - **多玩家档案**：多个离线玩家配置（名称 / 头像 / 皮肤类型），交互式增删改选；支持 authlib-injector 外置登录（如 LittleSkin，登录态加密持久化，启动自动在线刷新）
 - **启动稳定性**：自动内存分配（可用内存 50%，上限 16G）、GC 档位、fcitx/ibus XIM 崩溃自动修复（GLFW 3.4 替换）、每次启动落盘完整日志
 - **本地开服**：原版/Forge/Fabric/NeoForge 服务端一键安装与前台启动（`server-install`/`server-start`），控制台直通，headless 环境友好
-- **QML GUI**（测试版）：与 CLI 共享同一套 SDK（libmlccore）
+- **QML GUI**（开发暂停，见下）：源码已保留，未进发布包
+
+> **GUI 开发状态：已暂停（2026-11-14）**
+>
+> 图形界面（`gui/` 下的 QML App，二进制名 `mlc-gui`）目前**暂停开发**，当前重心是 CLI 与 SDK。
+>
+> - **未进入发布流程**：`make package-tar` / `release.sh` 只打包命令行版 `mlc`，预编译包里**没有** `mlc-gui`，普通用户装不到它。
+> - **仅源码可用**：开发者仍可 `make run` 在本地构建运行，功能为测试版（启动页、下载页、设置页、更多页的基础框架）。
+> - **暂停并不等于放弃**：代码、QML 组件、C++ 桥接层全部保留在仓库中，随时可恢复。
+>
+> 恢复开发前需要先解决 GUI 的零依赖分发问题（详见 `CLAUDE.md` 的「GUI 开发暂停」一节）：当前 `bundle-dist.sh` 只收编了 `plugins/tls/`，没有任何 Qt **平台插件**（`platforms/`）、Wayland shell 集成插件或 QML 模块，直接打包 GUI 会因找不到平台插件而无法启动。
+>
+> 日常使用请走 CLI：`mlc help` 查看全部命令。
 
 ## 安装
 

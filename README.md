@@ -14,7 +14,19 @@ A cross-platform Minecraft launcher written in C++20 / Qt 6, centered on the lig
 - **Player profiles**: multiple offline player profiles (name / avatar / skin type) with interactive add/edit/remove/select; authlib-injector external login (e.g. LittleSkin) with encrypted, persisted sessions auto-refreshed online at launch
 - **Launch stability**: automatic memory sizing (50% of available RAM, capped at 16G), GC tiers, auto-fix for fcitx/ibus XIM crashes (GLFW 3.4 replacement), full launch logs on disk
 - **Local server hosting**: install and run vanilla/Forge/Fabric/NeoForge servers with two commands (`server-install`/`server-start`), console attached, headless-friendly
-- **QML GUI** (test version): shares the same SDK (libmlccore) with the CLI
+- **QML GUI** (development paused — see below): source retained, not shipped in release packages
+
+> **GUI development status: PAUSED (2026-11-14)**
+>
+> The graphical front-end (the QML app under `gui/`, binary name `mlc-gui`) is currently **on hold**. Focus is on the CLI and the SDK.
+>
+> - **Not part of the release pipeline**: `make package-tar` / `release.sh` only package the command-line `mlc`. Prebuilt packages do **not** contain `mlc-gui`, so regular users cannot install it.
+> - **Source-only**: developers can still build and run it locally with `make run`. It is a test-version UI (basic scaffolding for Launch / Download / Settings / More pages).
+> - **Paused, not abandoned**: all QML, components, and the C++ bridge layer stay in the repo and can be resumed at any time.
+>
+> Before resuming, the zero-dependency distribution problem must be solved first (see the "GUI 开发暂停" section in `CLAUDE.md`): `bundle-dist.sh` currently bundles only `plugins/tls/` — no Qt **platform plugins** (`platforms/`), no Wayland shell-integration plugins, and no QML modules. Packaging the GUI as-is would fail to start with "no Qt platform plugin could be initialized".
+>
+> For everyday use, stick to the CLI: run `mlc help` for all commands.
 
 ## Install
 

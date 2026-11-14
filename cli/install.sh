@@ -139,6 +139,31 @@ rm -f "${INSTALL_BIN}/lpcl" "${INSTALL_BIN}/lpcl-cli" "${INSTALL_BIN}/lpcl-gui" 
 if [ -x "${INSTALL_LIB}/mlc-gui" ]; then
     echo "==> 注册命令 mlc-gui → ${INSTALL_BIN}/mlc-gui"
     ln -sf "${INSTALL_LIB}/mlc-gui" "${INSTALL_BIN}/mlc-gui"
+
+    # ---- Linux 桌面集成（图标 / 启动器项） ----
+    # Wayland 用 app_id（程序内 setDesktopFileName），X11 用 StartupWMClass；
+    # 两者都指向本 .desktop 文件，文件名与 app_id 一致才能被匹配到。
+    if [ "$OS_NAME" != "Darwin" ]; then
+        APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+        ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+        SRC_APPS="${INSTALL_LIB}/share/applications"
+        SRC_ICONS="${INSTALL_LIB}/share/icons/hicolor/scalable/apps"
+
+        if [ -f "${SRC_APPS}/org.mlc.MinecraftLauncher.desktop" ]; then
+            mkdir -p "$APPS_DIR" "$ICON_DIR"
+            # Exec 指向最终命令名（PATH 中的 mlc-gui），不写死安装目录
+            sed 's|^Exec=.*|Exec=mlc-gui|' \
+                "${SRC_APPS}/org.mlc.MinecraftLauncher.desktop" > "${APPS_DIR}/org.mlc.MinecraftLauncher.desktop"
+            if [ -f "${SRC_ICONS}/org.mlc.MinecraftLauncher.svg" ]; then
+                cp -f "${SRC_ICONS}/org.mlc.MinecraftLauncher.svg" "$ICON_DIR/"
+            fi
+            echo "==> 已注册桌面项 ${APPS_DIR}/org.mlc.MinecraftLauncher.desktop"
+            command -v update-desktop-database >/dev/null 2>&1 && \
+                update-desktop-database "$APPS_DIR" 2>/dev/null || true
+            command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+                gtk-update-icon-cache -q -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" 2>/dev/null || true
+        fi
+    fi
 fi
 
 # ---- 验证 ----

@@ -12,9 +12,10 @@ CLI_PKG_BUILD := cli/cmake-build-release
 
 .PHONY: run cli package package-cli package-tar install
 
-# ---- QML GUI App（测试版） ----
+# ---- QML GUI App（开发暂停，仅源码可用，见 CLAUDE.md「GUI 开发暂停」） ----
 
 run:
+	@echo "注意: QML GUI 开发已暂停（2026-11-14），此目标仅供本地调试，不随发布包分发"
 	rm -rf $(BUILD_DIR)
 	cmake -B $(BUILD_DIR) -G Ninja -DCMAKE_PREFIX_PATH=$(QT_PREFIX) -DCMAKE_BUILD_TYPE=Debug
 	cmake --build $(BUILD_DIR) --target mlc-gui

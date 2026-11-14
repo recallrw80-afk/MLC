@@ -1,12 +1,42 @@
-# Rust 重写计划：SDK + CLI（GUI 保持 Qt/QML）
+# Rust 重写计划：SDK + CLI + GUI（全栈 Rust）
 
-> 2026-09 决定：`sdk/`（libmlccore）与 `cli/`（mlc）用 Rust 重写；`gui/`（QML）保持 Qt 不变，仅桥接层改走 C ABI。本文是迁移的唯一权威计划。
+> 2026-09 决定：`sdk/`（libmlccore）与 `cli/`（mlc）用 Rust 重写。
+>
+> **2026-11-14 修订**：GUI 路线由「保持 Qt/QML」改为**Rust 自研 GUI（框架 Reta）**。`gui/` 的 Qt/QML 实现转为**参考实现与行为基准**，不再是最终产品形态。本文是迁移的唯一权威计划。
 
 ## 目标与动机
 
 - 补平台缺口：Linux aarch64（Qt 官方无 6.11 ARM64 包，Rust 一等支持）、Windows 转正
 - 发布物从"二进制 + 收编 Qt 库 + rpath 黑科技"简化为近似单文件静态二进制（Linux 用 musl）
-- 摆脱对 QtCore/QtNetwork 的核心依赖（Qt 只留 GUI 壳）
+- **彻底消除 Qt 依赖**：不再需要收编 Qt 库、平台插件、QML 模块（这正是当前 GUI 无法分发的根因，见下文"GUI 切换的动机"）
+- GUI 与 SDK 同语言：进度/日志不再需要跨 C ABI 桥接，减少一层 FFI 与状态同步负担
+
+## GUI 切换的动机（2026-11-14）
+
+原计划让 GUI 保持 Qt/QML，但实践中暴露出一个硬阻塞：**GUI 无法随包分发**。
+
+`cli/bundle-dist.sh` 只收编 `plugins/tls/`，没有任何 Qt 平台插件（`platforms/`）、Wayland shell 集成插件或 QML 模块。用它打包 GUI 会直接失败：
+
+```
+This application failed to start because no Qt platform plugin could be initialized.
+```
+
+补齐这些需要一整套额外工程：`libqwayland.so`/`libqxcb.so`、Wayland 集成插件组、10+ 个 Qt6 库（Quick/QuickControls2/Qml/OpenGL/DBus/WaylandClient…）、`libxkbcommon`/`libwayland-*`、以及整个 `qml/` 模块树。结果是**预编译包里从来没有 `mlc-gui`**，`install.sh` 里注册 GUI 命令的分支永远不会触发——GUI 事实上只存在于开发者本地构建。
+
+改用 Rust + Reta 后，GUI 与 CLI 共享同一静态链接模型，**天然回到"近似单文件"的分发形态**，这个问题从根上消失。
+
+## GUI 技术选型：Reta
+
+自研 Rust UI 框架 [Reta](../../../../Airplane/Reta)（2D + partial-3D，跨平台；Linux X11 + Wayland 为一等目标，Windows 支持，macOS 计划 2028）。
+
+选它的理由：
+
+- **纯 Rust、无 C/C++ 依赖**：与 `rustls` 而非 OpenSSL 的既有决策一脉相承，保住 musl 全静态构建
+- **Linux X11 + Wayland 双支持**：正是当前 Qt 路线卡住的地方
+- **自带组件层**（`reta-components`）、渲染层（`reta-render`：software/Vulkan）、文本与 SVG 层，不必自研基础控件
+- **允许像素级自定义**：MLC 要求与 PCL 原版视觉对齐，通用控件库往往不够自由
+
+**风险**：Reta 仍在开发中（用户 2026-11-14 确认"还在开发中"）。对策见下文风险表——GUI 阶段排在最后，且先用 explorer-style spike 验证可行性再全力投入。
 
 ## 目标架构
 
@@ -18,11 +48,12 @@ rust/
   crates/
     mlccore/            # lib：全部启动器逻辑（对应现有 sdk/）
     mlc/                # bin：clap CLI（对应现有 cli/）
-    mlccore-ffi/        # cdylib：C ABI，供 Qt GUI 链接；cbindgen 生成 mlc_ffi.h
+    mlc-gui/            # bin：Reta GUI（新增，对应现有 gui/）
 ```
 
-- GUI 侧：现有 4 个 bridge（instance/player/install/mod_platform）从直接调 C++ SDK 改为调 C ABI，QVariantMap 组装留在 Qt 侧，**QML 零改动**；进度/日志经回调函数指针转 Qt signal。
-- CMake 用 corrosion（或直接 find_library）链接 Rust 产物。
+- **GUI 直接依赖 `mlccore`**（同为 Rust crate），不再需要 `mlccore-ffi`。
+- `mlccore-ffi` 的角色变化：原计划为 Qt GUI 提供 C ABI；GUI 改 Rust 后**不再是主路径**。保留它仅用于「外部非 Rust 前端接入 `mlccore`」这一场景（可选，优先级低）。若阶段 4 时仍无外部需求，可降低维护优先级但不删除。
+- 现有 `gui/ui` 的 22 个 QML 文件（6854 行）+ `gui/src/bridge`（430 行）作为**行为基准**保留：迁移时逐页对照（布局尺寸、颜色、动画时序、交互文案），Reta 重写完成后才删除。
 
 ## 硬约束（全程不可妥协）
 
@@ -75,19 +106,59 @@ rust/
 - **尽早移植 `mlc test` 全系统自检**，它是阶段 1 后半程开始的回归门。
 - launch 类命令加（或复刻）dry-run 能力，用于新旧二进制 JVM 参数 diff。
 
-## 阶段 3 — GUI 对接（FFI）
+## 阶段 3 — GUI 重写（Reta）
 
-- `mlccore-ffi`：为 GUI 用到的 API 子集（约 `mlc.h` 中 25 个函数）做 C ABI 包装；cbindgen 出头文件进构建。
-- 改写 4 个 bridge + file_drop_handler；GUI 全页面手工回归（启动、下载进度、实例、Mod 平台）。
-- 此阶段 C++ `sdk/` 只剩 GUI 这一条使用者，CLI 应已完全切到 Rust。
+前提：阶段 1（SDK）与阶段 2（CLI）已 parity 达标。GUI 排最后，因为它是唯一依赖**外部仍在开发的框架**的部分。
+
+**3.0 可行性 spike（先做，决定是否继续）**
+
+- 在 `rust/crates/mlc-gui` 建最小可运行骨架，验证四件事：
+  1. Reta 能在本机 X11 与 Wayland 下起窗（当前计划的一项硬需求）
+  2. 中文文本渲染正常（字体回退链走 fontconfig）
+  3. 能用 Reta 画出启动页最复杂的一块（版本列表 + 侧栏 + 卡片），确认布局能力足够
+  4. 静态链接后二进制可独立运行（无 Qt 依赖）
+- 通过 → 进 3.1；不通过 → 记录具体卡点，回头评估「Reta 补能力」还是「换方案」，不硬推
+
+**3.1 页面迁移（按依赖序，每页对照 QML 基准）**
+
+以现有 QML 为行为基准，逐页重写（22 个文件 / 6854 行）：
+
+| 顺序 | 页面 | 基准文件 | 备注 |
+|---|---|---|---|
+| 1 | 主框架 + 导航 | `Main.qml` | 含入场动画（红线：必须归零） |
+| 2 | 启动页 | `PageLaunch.qml` (1993 行) | 最复杂：版本列表、玩家面板、实例设置、拖放导入 |
+| 3 | 设置页 | `PageSettings.qml` | |
+| 4 | 下载页 | `PageDownload.qml` + `MLCDownloadPanel.qml` | Mod 平台搜索/详情/下载 |
+| 5 | 更多页 | `PageMore.qml` | 关于、报告、自更新 |
+| — | 通用组件 | `gui/ui/components/MLC*.qml`（16 个） | 按钮/卡片/列表项/输入框/滚动条/弹窗/提示等，先于页面沉淀 |
+
+**3.2 组件层**
+
+优先把 16 个 `MLC*` 组件移植为 Reta 控件（`mlc-gui/src/widgets/`），保持命名与视觉参数一致（`Theme.qml` 的色板/尺寸/字体作为对照表）。
+
+**3.3 与核心的对接**
+
+GUI 直接 `use mlccore::...`，不再经 C ABI：
+
+- 进度/日志：`mlccore` 已用 `tracing`，GUI 挂 subscriber 即可；长任务用 `tokio` channel 推送进度事件
+- 交互：直接调 `mlccore` 的 async API，不阻塞 UI 线程（渲染循环与 tokio runtime 分离）
+- 文件拖放：Reta 若已支持则直接用；否则按现有 `file_drop_handler.cpp` 的行为自行接（Linux 主要为 Xdnd / wl_data_device）
+
+**3.4 回归**
+
+- 与 QML 版并排截图对照（布局、间距、颜色、字体大小、动画时序）
+- 全页面手工回归：启动、下载进度、实例管理、Mod 平台、玩家切换、设置项
 
 ## 阶段 4 — 切换、发布与清理
 
-- 打包：删除 `bundle-dist*.sh`、rpath `--disable-new-dtags`、Qt 收编逻辑；发布物 = 单文件 tar.xz（linux musl 全静态）。
-- `install.sh`：识别 linux-aarch64 与 windows 包；Gitee 镜像逻辑保留。
+- 打包：删除 `bundle-dist*.sh`、rpath `--disable-new-dtags`、Qt 收编逻辑；发布物 = 单文件 tar.xz（linux musl 全静态）+ GUI（同布局，无 Qt）。
+- **Linux 桌面集成保留**：`.desktop` / App ID / `StartupWMClass` 方案不变（详见 `CLAUDE.md`「Linux 桌面集成」）。Reta 侧需自行设置 Wayland `app_id` 与 X11 `WM_CLASS`——注意 `WM_CLASS` 由**可执行文件名**决定，仍需 `StartupWMClass=mlc-gui` 对齐。
+- `install.sh`：识别 linux-aarch64 与 windows 包；Gitee 镜像逻辑保留；GUI 随包分发（此时才真正有意义）。
 - release CI：矩阵扩到 5 目标；CF key 用 `option_env!`/build.rs 编译期嵌入，语义与现状等价（无 key 回退 MCIM）。
 - 文档：README（双语）改构建/安装节；CONTRIBUTING 依赖策略节改写；本计划标记完成。
-- parity 达标后删除 C++ `sdk/` 与 `cli/`（含根 CMakeLists 中对应段），打 tag 发版。
+- parity 达标后删除 C++ `sdk/`、`cli/` 与 `gui/`（含根 CMakeLists 中对应段），打 tag 发版。
+
+> 注意：**删除 QML 版之后就没有视觉基准了**。删除前必须确认 Reta 版已稳定，且建议把关键截图存进 `docs/` 作为后续回归参照。
 
 ## 迁移期规则（写进 AGENTS.md）
 
@@ -105,3 +176,7 @@ rust/
 | TTY 交互行为差异 | 逐命令对照；无 TTY 降级列为测试项 |
 | 自更新新旧布局过渡 | 老包→新包的就地升级列为专项测试 |
 | "启动器能跑 ≠ 游戏能跑"（Linux ARM64 老版本无官方 LWJGL natives） | 文档注明；与语言无关，不在本期范围 |
+| **Reta 仍在开发中**（API 可能变动、能力可能缺） | GUI 排最后（阶段 3）；先用 3.0 spike 验证起窗/中文/布局/静态链接四项，不通过则停在此处并重新评估，不硬推 |
+| **Reta 能力不足**（如缺拖放、IME、复杂列表虚拟化） | spike 阶段就验，缺什么先补 Reta 或找替代；不要在 3.1 中途才发现 |
+| **视觉对齐成本**（6854 行 QML 逐页对照） | 保留 QML 作为基准直到 Reta 版稳定；先沉淀 16 个通用组件再做页面；关键截图存档 |
+| GUI 从 Qt 换栈导致用户界面回归 | 阶段 3 独立于 CLI 发布：CLI 可先发 Rust 版，GUI 未达 parity 前不阻塞发版 |

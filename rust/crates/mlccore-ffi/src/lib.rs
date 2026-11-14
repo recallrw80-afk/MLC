@@ -1,4 +1,8 @@
-//! mlccore 的 C ABI 包装，供 Qt GUI（mlc-gui 的 4 个 bridge）链接。
+//! mlccore 的 C ABI 包装。
+//!
+//! 用途变更（2026-11-14）：GUI 改为 Rust + Reta，直接 `use mlccore`，不再经 C ABI。
+//! 本 crate 因此**不再是主路径**，现仅服务于「外部非 Rust 前端接入 mlccore」这一场景；
+//! 若无实际需求，可降低维护优先级（但暂不删除）。原 Qt GUI 桥接方案已废弃。
 //!
 //! 约定：
 //! - 字符串出参所有权归调用方，统一用 `mlc_string_free` 释放；入参为 NUL 结尾 UTF-8

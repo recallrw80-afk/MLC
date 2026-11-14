@@ -1,6 +1,6 @@
 [package]
 name = "mlccore-ffi"
-description = "mlccore 的 C ABI 层（cdylib），供 Qt GUI（mlc-gui）链接"
+description = "mlccore 的 C ABI 层（cdylib），供外部非 Rust 前端链接（GUI 已改 Rust+Reta，不再是主路径）"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
