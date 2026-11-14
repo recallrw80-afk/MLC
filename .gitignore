@@ -1,113 +1,82 @@
-# This file is used to ignore files which are generated
-# ----------------------------------------------------------------------------
+# MLC 仓库 .gitignore
+# ---------------------------------------------------------------------------
+# 2026-11-14 目录交换后的职责划分：
+#   本文件（仓库根）  → Rust 主线 + 全局通用规则
+#   cpp/.gitignore    → 仅 C++ 工程（cmake-build-*、Qt 产物等）
+# 注意：`.gitignore` 的路径相对于**所在目录**。/xxx 锚定根，xxx 匹配任意层级。
 
-*~
-*.autosave
-*.a
-*.core
-*.moc
+# ==== Rust / Cargo ====
+/target/
+**/*.rs.bk
+*.rmeta
+
+# ==== 构建产物（通用）====
+/build*/
+cmake-build-debug/
+cmake-build-release/
+/dist
 *.o
 *.obj
-*.orig
-*.rej
+*.a
 *.so
 *.so.*
-*_pch.h.cpp
-*_resource.rc
-*.qm
-.#*
-*.*#
-core
-!core/
-tags
-.DS_Store
-.directory
-*.debug
-Makefile*
-!/Makefile
-*.prl
-*.app
-moc_*.cpp
-ui_*.h
-qrc_*.cpp
-*_qml_module_dir_map.qrc
-Thumbs.db
-*.res
-*.rc
+*.dll
+*.exe
+*.lib
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.d
+*.rlib
+# 注：不忽略 Cargo.lock（应用型项目必须提交，锁定依赖版本）
+
+# ==== IDE / 编辑器 ====
+.idea/
+.vscode/
+.qtcreator/
+/.kdev4/
+*.pro.user*
+*.qbs.user*
+CMakeLists.txt.user*
+CMakeUserPresets.json
 /.qmake.cache
 /.qmake.stash
 **/.qmlls.ini
 
-# qtcreator generated files
-*.pro.user*
-*.qbs.user*
-CMakeLists.txt.user*
-
-# xemacs temporary files
-*.flc
-
-# Vim temporary files
+# ==== 临时 / 系统文件 ====
+*~
+*.autosave
+*.orig
+*.rej
+.#*
+*.*#
 .*.swp
-
-# Visual Studio generated files
-*.ib_pdb_index
-*.idb
-*.ilk
-*.pdb
-*.sln
-*.suo
-*.vcproj
-*vcproj.*.*.user
-*.ncb
-*.sdf
-*.opensdf
-*.vcxproj
-*vcxproj.*
-
-# MinGW generated files
-*.Debug
-*.Release
-
-# Python byte code
+*.flc
+.DS_Store
+.directory
+Thumbs.db
+core
+!core/
+tags
 *.pyc
 
-# Binaries
-# --------
-*.dll
-*.exe
-.idea
+# ==== 敏感 / 本地配置（禁止入库）====
+.env
+.gitee-token
+release.sh
+mirror-gitee.sh
+.codegraph
 
-# Directories with generated files
-.moc/
-.obj/
-.pch/
-.rcc/
-.uic/
-/build*/
-/.qtcreator/
+# 注：备份放在项目根 MLC/.backup/（不在本 git 仓库内），无需在此忽略
+
+# ==== 文档 ====
+# 约定：默认忽略 *.md，仅白名单入库。
+# docs/ 整体忽略（2026-11-14 用户要求）——含 rust-rewrite-plan / rust-inventory /
+# PCL-Download-Architecture，这些只在本地存在，不随仓库分发。
+/docs/
 *.md
 !README.md
 !README.zh-CN.md
 !CONTRIBUTING.md
 !THIRD-PARTY-NOTICES.md
-!/cpp/docs/
-!/cpp/docs/*.md
-/cpp/docs/PCL-Download-Architecture.md
-.gitee-token
-cmake-build-debug/
-cmake-build-release/
-/.idea
-/bin
-
-/example
-.codegraph
-
-CMakeUserPresets.json
-/html
-dist
-.env
-release.sh
-mirror-gitee.sh
-
-# Rust（阶段 0+ 的 cargo workspace；Cargo.lock 需要提交，不要忽略）
-/target/
