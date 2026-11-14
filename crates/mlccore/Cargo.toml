@@ -4,6 +4,8 @@ description = "MLC 启动器核心库（Rust 重写版，对应原 C++ libmlccor
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
@@ -12,7 +14,6 @@ workspace = true
 # 仅用于构建期读取 git describe / commit（无第三方依赖，手写）
 
 [dependencies]
-serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true
@@ -30,4 +31,3 @@ md-5.workspace = true
 sysinfo.workspace = true
 tracing.workspace = true
 dirs.workspace = true
-which.workspace = true

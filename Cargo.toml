@@ -11,6 +11,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# MSRV：与 rust-toolchain.toml 的 channel 对齐。CI 用同一版本跑 clippy -D warnings，
+# 避免「本地旧版漏检、CI 新版失败」。
+rust-version = "1.100"
 license = "GPL-3.0-only"
 repository = "https://github.com/recallrw80-afk/MLC"
 
@@ -20,12 +23,10 @@ mlccore = { path = "crates/mlccore" }
 
 # CLI
 clap = { version = "=4.6.7", features = ["derive"] }
+# TUI 交互统一用 inquire（create-vite 风格选择器/向导）；不再引入 dialoguer/indicatif
 inquire = "=0.9.4"
-dialoguer = "=0.12"
-indicatif = "0.18"
 
 # 核心
-serde = { version = "1", features = ["derive"] }
 serde_json = "=1.0.154"
 # rustls 而非 OpenSSL：TLS 全用 Rust 实现，不依赖系统 OpenSSL。
 # 2026-11-14 升级 reqwest 0.12 → 0.13 后的 feature 变化（用户已确认选型）：
@@ -54,7 +55,6 @@ sysinfo = "=0.40.3"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 dirs = "=7.0.0"
-which = "8.0.6"
 
 [workspace.lints.rust]
 unsafe_code = "allow" # ffi crate 必须 unsafe；不在 workspace 级禁止

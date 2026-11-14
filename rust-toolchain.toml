@@ -1,0 +1,7 @@
+# Rust 工具链锁定
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+# 交叉编译目标在 CI 里按矩阵单独加（rustup target add），此处只列本机常用
+targets = ["x86_64-unknown-linux-gnu"]
+profile = "minimal"

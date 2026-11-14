@@ -505,20 +505,12 @@ pub fn select_java(
     let mut candidates: Vec<&JavaEntry> = list
         .iter()
         .filter(|java| {
-            if let Some(min) = min {
-                if !min.is_empty() && java.version < *min {
-                    return false;
-                }
-            }
-            if let Some(max) = max {
-                if !max.is_empty() && java.version > *max {
-                    return false;
-                }
-            }
-            if java.is_64bit && !platform::is_64bit() {
-                return false;
-            }
-            true
+            // 区间过滤：min/max 为空视为无约束
+            let below_min = min.is_some_and(|m| !m.is_empty() && java.version < *m);
+            let above_max = max.is_some_and(|m| !m.is_empty() && java.version > *m);
+            // 32 位系统上不能用 64 位 JVM
+            let arch_mismatch = java.is_64bit && !platform::is_64bit();
+            !(below_min || above_max || arch_mismatch)
         })
         .collect();
 
