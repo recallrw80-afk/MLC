@@ -515,9 +515,15 @@ McModLoaderInfo VersionManager::detectModLoaders(const json &versionJson) {
         // Forge detection（排除 neoforge，否则版本号会被误提取）
         if (!info.hasNeoForge && qVerId.contains("forge")) {
             info.hasForge = true;
-            // Extract Forge version from the version ID
-            // Format: 1.20.1-forge-47.2.0
-            QRegularExpression forgeRe("forge[-_]([\\d.]+)");
+            // 从版本目录名提取 Forge 版本。真实存在三种格式（大小写不敏感）：
+            //   1.20.1-forge-47.2.0                  → 47.2.0
+            //   1.12.2-forge1.12.2-14.23.5.2860      → 14.23.5.2860（旧版，无分隔符且带 MC 版本前缀）
+            //   1.7.10-Forge10.13.4.1614             → 10.13.4.1614（大写 F）
+            // 旧实现 "forge[-_]([\d.]+)" 只覆盖第一种：旧版格式匹配不到（forgeVersion 为空，
+            // 兼容矩阵整段跳过），而 "forge-1.12.2-14.23.5.2860" 会错取 MC 版本 1.12.2。
+            static const QRegularExpression forgeRe(
+                QStringLiteral("forge[-_]?(?:\\d+(?:\\.\\d+)*-)?(\\d+\\.\\d+(?:\\.\\d+)*(?:\\.\\d+)?)"),
+                QRegularExpression::CaseInsensitiveOption);
             auto match = forgeRe.match(QString::fromStdString(versionId));
             if (match.hasMatch()) {
                 info.forgeVersion = match.captured(1);

@@ -251,17 +251,29 @@ void Installer::installLoader(const QString &loaderType, const QString &mcDir,
 // Version detection — fetch available versions from APIs
 
 void Installer::fetchForgeVersions(std::function<void(bool, QStringList)> onComplete) {
-    QString url = FORGE_API + "/index.html";
-    DownloadManager::instance().downloadToString(url, [onComplete](bool ok, QString html) {
+    // Forge 的 maven 站已不提供 index.html（Reposilite 返回 404），旧的 HTML 解析
+    // 必然失败、永远拿不到版本列表。改用官方仍在维护的 promotions_slim.json：
+    //   { "promos": { "1.20.1-latest": "47.4.10", "1.20.1-recommended": "47.3.0", ... } }
+    QString url = FORGE_API + "/promotions_slim.json";
+    DownloadManager::instance().downloadJson(url, [onComplete](bool ok, QString, json doc) {
         QStringList versions;
-        if (!ok) { onComplete(false, versions); return; }
-        // Parse HTML to extract version links
-        QRegularExpression re(R"(forge-(\d+\.\d+(?:\.\d+)?-\d+\.\d+\.\d+)-installer)");
-        auto it = re.globalMatch(html);
-        while (it.hasNext()) {
-            auto m = it.next();
-            versions.append(m.captured(1));
+        if (!ok || !doc.is_object() || !doc.contains("promos") || !doc["promos"].is_object()) {
+            onComplete(false, versions);
+            return;
         }
+        // key 形如 "<mc>-latest" / "<mc>-recommended"，value 即 Forge 版本号。
+        // 统一转成 "<mc>-<forge>"，与 installForge 拼 URL 的约定一致。
+        for (auto it = doc["promos"].begin(); it != doc["promos"].end(); ++it) {
+            if (!it.value().is_string()) continue;
+            const QString key = QString::fromStdString(it.key());
+            const int dash = key.lastIndexOf('-');
+            if (dash <= 0) continue;
+            const QString mcVer = key.left(dash);
+            const QString forgeVer = QString::fromStdString(it.value().get<std::string>());
+            if (forgeVer.isEmpty()) continue;
+            versions.append(mcVer + "-" + forgeVer);
+        }
+        versions.removeDuplicates();
         onComplete(true, versions);
     });
 }
@@ -301,8 +313,9 @@ void Installer::fetchNeoForgeVersions(std::function<void(bool, QStringList)> onC
 
 void Installer::detectBestForgeVersion(const QString &mcVersion,
                                          std::function<void(QString)> onComplete) {
-    // Best-effort: return the recommended Forge version for this MC version.
-    // For production, this should call the Forge API. Known stable versions:
+    // 先查内置稳定版本表（快、无需网络），命中即返回。
+    // 表只覆盖常见版本；未收录的 MC 版本回退到 Forge 官方 promotions 接口查询，
+    // 否则会返回空串导致安装直接失败。
     QMap<QString, QString> knownStable = {
         {"1.20.1", "47.3.0"},
         {"1.20.4", "49.0.47"},
@@ -313,7 +326,27 @@ void Installer::detectBestForgeVersion(const QString &mcVersion,
         {"1.12.2", "14.23.5.2859"},
         {"1.8.9",  "11.15.1.2318"},
     };
-    if (onComplete) onComplete(knownStable.value(mcVersion));
+    if (knownStable.contains(mcVersion)) {
+        if (onComplete) onComplete(knownStable.value(mcVersion));
+        return;
+    }
+
+    // 回退：优先 recommended，其次 latest
+    fetchForgeVersions([mcVersion, onComplete](bool ok, QStringList versions) {
+        QString best;
+        if (ok) {
+            for (const auto &v : versions) {
+                if (!v.startsWith(mcVersion + "-")) continue;
+                // versions 里同时含 <mc>-latest 与 <mc>-recommended 两条，
+                // fetchForgeVersions 已合并去重，这里取版本号最大的即可
+                const QString forgeVer = v.mid(mcVersion.size() + 1);
+                if (best.isEmpty()) { best = forgeVer; continue; }
+                if (QVersionNumber::fromString(forgeVer) > QVersionNumber::fromString(best))
+                    best = forgeVer;
+            }
+        }
+        if (onComplete) onComplete(best);  // 查不到给空串，由上层报错
+    });
 }
 
 QString Installer::detectBestFabricVersion(const QString &) {
