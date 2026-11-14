@@ -363,7 +363,10 @@ static QList<TestItem> runCommandTests() {
 
     // ---- 合成包冒烟（inpack 端到端，需要网络与游戏目录） ----
     {
+        // 统一在这里补尾斜杠：后续所有 folder + "xxx" 拼接都依赖它。
+        // （原先只在 472/503 行零散补，导致 421 行在补之前就拼接，拼出 "…mcinstances/…" 的错路径）
         QString folder = Settings::instance().getString("LaunchFolderSelect");
+        if (!folder.isEmpty() && !folder.endsWith('/')) folder += '/';
         if (folder.isEmpty()) {
             warn("inpack-smoke", "游戏目录未设置，跳过合成包冒烟");
         } else if (!zipAvailable()) {
@@ -469,7 +472,6 @@ static QList<TestItem> runCommandTests() {
             mlc::removeInstance(hmclName);
             if (!hmclZip.isEmpty()) {
                 auto r = importAndWait(hmclZip, hmclName);
-                if (!folder.endsWith('/')) folder += '/';
                 bool verOk = QFile::exists(folder + "versions/1.12.2/1.12.2.json")
                           && QFile::exists(folder + "versions/1.12.2/1.12.2.jar");
                 bool nativesOk = !QDir(folder + "versions/1.12.2/natives")

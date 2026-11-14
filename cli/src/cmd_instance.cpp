@@ -207,6 +207,8 @@ int handleInpack(QStringList &args) {
 }
 
 int handleRm(QStringList &args) {
+    // --yes：非交互环境显式确认批量删除。先摘除，避免它被后续 args[1] 当成实例名
+    const bool assumeYes = args.removeAll("--yes") > 0;
     if (args.size() < 2) {
         // 无参：TTY 上下键选择要删的实例（二次确认）；非 TTY 报用法
         if (!isatty(fileno(stdin))) {
@@ -248,6 +250,26 @@ int handleRm(QStringList &args) {
         if (ids.isEmpty()) {
             std::cout << _("没有可删除的实例\n", "No instances to remove\n");
             return 0;
+        }
+        // 通配删全部是不可逆的批量操作——必须先确认。
+        // （单条删除在 TTY 分支有二次确认，这里原先却直接删，误输入即全丢）
+        std::cout << _("即将删除以下全部实例（不可恢复）:\n",
+                       "About to delete ALL of the following instances (irreversible):\n");
+        for (const auto &id : ids)
+            std::cout << "  - " << id.toStdString() << "\n";
+        std::cout.flush();
+        if (isatty(fileno(stdin))) {
+            auto yes = tuiConfirm(QString(_("确认删除全部 %1 个实例", "Delete all %1 instances"))
+                                      .arg(ids.size()), false);
+            if (!yes || !*yes) {
+                std::cerr << _("已取消\n", "Cancelled\n");
+                return 1;
+            }
+        } else if (!assumeYes) {
+            // 非 TTY（脚本/管道）：要求显式 --yes，避免管道里误触发全删
+            std::cerr << _("error:  非交互环境删除全部实例需加 --yes 显式确认\n",
+                           "error:  removing all instances non-interactively requires --yes\n");
+            return 1;
         }
         int removed = 0;
         for (const auto &id : ids) {

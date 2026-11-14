@@ -137,8 +137,21 @@ int handleReport(QStringList &args) {
               << url.toStdString() << "\n";
     if (isatty(fileno(stdin))) {
         auto open = tuiConfirm(_("在浏览器中打开吗", "Open in browser"), true);
-        if (open && *open)
-            QProcess::startDetached("xdg-open", {url});
+        if (open && *open) {
+            // 原实现硬编码 xdg-open，在 macOS/Windows 上必然失败（返回 false 且静默）
+            switch (currentPlatform()) {
+            case Platform::MacOS:
+                QProcess::startDetached("open", {url});
+                break;
+            case Platform::Windows:
+                // 含 & 的 URL 必须整体加引号，否则 cmd 会截断
+                QProcess::startDetached("cmd", {"/c", "start", "", url});
+                break;
+            default:
+                QProcess::startDetached("xdg-open", {url});
+                break;
+            }
+        }
     }
     return 0;
 }

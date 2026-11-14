@@ -10,13 +10,18 @@
 
 QString extractFlag(QStringList &args, const QString &flag) {
     int idx = args.indexOf(flag);
-    if (idx >= 0 && idx + 1 < args.size()) {
-        QString value = args.at(idx + 1);
-        args.removeAt(idx + 1);
+    if (idx < 0) return {};
+    // flag 存在但缺少值（位于末尾，或后面紧跟另一个 flag）：视为「写了但没给值」，
+    // 必须把 flag 本身从 args 移除，否则它会残留并被后续 args[1] 之类的位置参数
+    // 读取误当成用户输入（如 `mlc inpack x.zip --to` 会把 "--to" 当实例名）
+    if (idx + 1 >= args.size() || args.at(idx + 1).startsWith("--")) {
         args.removeAt(idx);
-        return value;
+        return {};
     }
-    return {};
+    QString value = args.at(idx + 1);
+    args.removeAt(idx + 1);
+    args.removeAt(idx);
+    return value;
 }
 QString extractFolder(QStringList &args) { return extractFlag(args, "--folder"); }
 QString extractRename(QStringList &args) { return extractFlag(args, "--r"); }
@@ -58,12 +63,14 @@ const Command COMMANDS[] = {
      "  [name]  instance display name or vanilla version; omit for the picker.\n"
      "With a persisted external login, launches with that account (auto-refresh); falls back to offline on failure.",
      handleLaunch, true},
-    {"list-rm", "list-rm [名称|*]", "list-rm [name|*]",
+    {"list-rm", "list-rm [名称|*] [--yes]", "list-rm [name|*] [--yes]",
      "删除实例（* 清空全部；无参上下键选择）", "Remove instance (* for all, select with arrows without args)",
-     "用法: mlc list-rm [名称|*]\n"
-     "  [名称]  实例显示名；* = 删除全部（注意加引号防 shell 展开）；省略则上下键选择 + 二次确认。",
-     "Usage: mlc list-rm [name|*]\n"
-     "  [name]  instance display name; * = remove all (quote it); omit for picker + confirmation.",
+     "用法: mlc list-rm [名称|*] [--yes]\n"
+     "  [名称]  实例显示名；* = 删除全部（注意加引号防 shell 展开）；省略则上下键选择 + 二次确认。\n"
+     "  --yes   非交互环境（脚本/管道）删除全部实例时的显式确认；交互式终端不需要（会弹确认）。",
+     "Usage: mlc list-rm [name|*] [--yes]\n"
+     "  [name]  instance display name; * = remove all (quote it); omit for picker + confirmation.\n"
+     "  --yes   explicit confirmation for removing ALL instances in a non-interactive shell; not needed on a TTY.",
      handleRm, true},
 
     // ---- 下载与导入 ----
