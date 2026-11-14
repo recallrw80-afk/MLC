@@ -31,6 +31,11 @@ bool extractZip(const QString &zipPath, const QString &destDir,
 QString findMcRoot(const QStringList &entries);
 bool validateInstanceName(const QString &name);
 
+// 校验清单里来的相对子目录（如 manifest 的 overrides / packmeta 的 overrides）：
+// 必须是 packDir 内的简单相对路径，拒绝 ..、绝对路径、盘符、反斜杠穿越。
+// 合法时返回规范化后的绝对路径，非法返回空串。
+QString resolvePackSubdir(const QString &packDir, const QString &rel);
+
 // 导入临时目录（common.cpp）：本进程专属 {mcFolder}/tmp/<pid>/，
 // 多进程并发 inpack 各自隔离，只建/删自己的子目录，不再整目录清 tmp/
 QString packTmpRoot();
@@ -42,6 +47,9 @@ void cleanupPackTmp();
 void markIncomplete(const QString &finalDir);
 void markComplete(const QString &finalDir);
 void cleanupOnError(const QString &finalDir);  // 删实例目录 + INI 映射 + 本进程 tmp/<pid>/
+// 兜底回滚：扫描 instances/ 下带 .incomplete 标记的目录并整体删除
+// （用于拿不到 finalDir 的异常路径，如清单解析抛错）
+void rollbackIncompleteInstances();
 bool checkNameConflict(const QString &targetDir, const QString &name,
                        bool explicitName, PackCompleteCallback onComplete);
 

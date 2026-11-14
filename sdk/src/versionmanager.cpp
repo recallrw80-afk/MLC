@@ -143,7 +143,11 @@ QList<McFolder> VersionManager::loadFolderList() {
 // Version listing
 
 void VersionManager::loadLocalVersions() {
-    if (m_mcFolder.isEmpty()) return;
+    // 必须走 mcFolder()：它负责把 Settings/默认值惰性解析进 m_mcFolder。
+    // 裸读 m_mcFolder 会让"只 Settings::initialize() 后直接调 listVersions()"的
+    // 纯 SDK 调用方拿到空列表（CLI 因 main() 先 setMcFolder 才没暴露）。
+    const QString folder = mcFolder();
+    if (folder.isEmpty()) return;
 
     m_isLoading = true;
     emit loadingChanged();
@@ -151,7 +155,7 @@ void VersionManager::loadLocalVersions() {
 
     m_versionList.clear();
 
-    QDir mcDir(m_mcFolder);
+    QDir mcDir(folder);
     if (!mcDir.exists()) {
         m_isLoading = false;
         emit loadingChanged();
@@ -164,12 +168,12 @@ void VersionManager::loadLocalVersions() {
 
     // 当前目录是否是持久化的默认目录（--folder 临时覆盖时只过滤不清理，防止误删默认目录的映射）
     QString persisted = Settings::instance().getString("LaunchFolderSelect");
-    bool isDefaultFolder = (QDir(persisted).absolutePath() + "/" == m_mcFolder);
+    bool isDefaultFolder = (QDir(persisted).absolutePath() + "/" == folder);
 
     for (auto it = instanceMap.begin(); it != instanceMap.end(); ++it) {
         const QString &dirName = it.key();
         const QString &displayName = it.value();
-        QString dirPath = m_mcFolder + "instances/" + dirName + "/";
+        QString dirPath = folder + "instances/" + dirName + "/";
 
         if (!QFileInfo::exists(dirPath + "PCL/Setup.ini")) {
             // INI 映射存在但实例目录已丢失（如手动删除目录）：
@@ -193,14 +197,16 @@ void VersionManager::loadLocalVersions() {
 
 // 只加载原版 MC 版本（versions/ 子目录）
 void VersionManager::loadMcVersions() {
-    if (m_mcFolder.isEmpty()) return;
+    // 同 loadLocalVersions：走 mcFolder() 触发惰性解析
+    const QString folder = mcFolder();
+    if (folder.isEmpty()) return;
 
     m_isLoading = true;
     emit loadingChanged();
 
     m_versionList.clear();
 
-    QDir versionsDir(m_mcFolder + "versions/");
+    QDir versionsDir(folder + "versions/");
     if (versionsDir.exists()) {
         for (const auto &entry : versionsDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
             QString dirName = entry.fileName();

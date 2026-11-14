@@ -49,9 +49,13 @@ static bool waitForAsync(const std::function<void(std::function<void(bool, QStri
 // 缺失则从官方源下载（失败回退 BMCLAPI 镜像），并按 latest.json 的 sha256 校验（javaagent 是代码注入，必须验完整性）
 static bool ensureAuthlibInjector() {
     QString jarPath = VersionManager::instance().mcFolder() + "authlib-injector.jar";
-    if (QFile::exists(jarPath)) return true;
-
-    qWarning() << "下载 authlib-injector ...";
+    const bool existed = QFile::exists(jarPath);
+    if (existed) {
+        // 已存在也要校验：中断的下载或手工放错的文件会留下损坏 jar，
+        // 而这是 -javaagent 代码注入，损坏会直接导致 JVM 起不来。
+        // 校验需要 latest.json 的 sha256 —— 下面统一拉取元数据后再判定。
+        qWarning() << "authlib-injector 已存在，校验完整性 ...";
+    }
     json meta;
     bool gotMeta = false;
     for (const char *metaUrl : {"https://authlib-injector.yushi.moe/artifact/latest.json",
@@ -62,7 +66,10 @@ static bool ensureAuthlibInjector() {
         });
         if (gotMeta) break;
     }
-    if (!gotMeta) return false;
+    if (!gotMeta) {
+        // 元数据拿不到：已有 jar 允许沿用（离线可玩），但没有则失败
+        return existed;
+    }
 
     QString url = QString::fromStdString(meta.value("download_url", ""));
     QString expectedSha;
@@ -75,6 +82,26 @@ static bool ensureAuthlibInjector() {
             [cb](bool dlOk, QString) { cb(dlOk, {}); });
     });
     if (!ok) { QFile::remove(jarPath); return false; }
+
+    if (existed) {
+        // 已有文件：sha256 匹配就直接用，不匹配则删除并重新下载
+        if (!expectedSha.isEmpty()) {
+            QFile ef(jarPath);
+            if (ef.open(QIODevice::ReadOnly)) {
+                QCryptographicHash h(QCryptographicHash::Sha256);
+                h.addData(&ef);
+                ef.close();
+                if (h.result().toHex().toLower() == expectedSha.toLower()) {
+                    qWarning() << "authlib-injector 校验通过（复用已有文件）";
+                    return true;
+                }
+            }
+            qWarning() << "authlib-injector 校验失败，删除后重新下载";
+            QFile::remove(jarPath);
+        } else {
+            return true;  // 无期望哈希，沿用已有文件
+        }
+    }
 
     if (!expectedSha.isEmpty()) {
         QFile f(jarPath);
@@ -314,6 +341,29 @@ static void maybeInstallGlfw34(const McVersion &version) {
 
 } // namespace
 
+
+// 解析 eula.txt：逐行去掉注释与空白，只有真正的 eula=true 才算同意。
+// （直接 contains("eula=true") 会把 "#eula=true" 这类注释误判为已同意）
+static bool isEulaAccepted(const QString &dir) {
+    QFile f(dir + "eula.txt");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+    const QString all = QString::fromUtf8(f.readAll());
+    f.close();
+    for (const QString &raw : all.split('\n')) {
+        QString line = raw;
+        const int hash = line.indexOf('#');
+        if (hash >= 0) line = line.left(hash);
+        line = line.trimmed();
+        if (line.isEmpty()) continue;
+        const int eq = line.indexOf('=');
+        if (eq < 0) continue;
+        if (line.left(eq).trimmed().compare("eula", Qt::CaseInsensitive) == 0
+            && line.mid(eq + 1).trimmed().compare("true", Qt::CaseInsensitive) == 0)
+            return true;
+    }
+    return false;
+}
+
 namespace mlc {
 
 // 外置登录持久化（定义见文件尾部 "外置登录" 一节）
@@ -516,18 +566,26 @@ bool launchVersion(const QString &versionId,
     // 中文输入修复：XIM 激活且 LWJGL 老（GLFW 3.3）时替换 GLFW 3.4
     maybeInstallGlfw34(version);
 
-    // 注：如在同一进程中多次调用 launchVersion，信号会累积连接。
-    // CLI 每次只启动一次游戏即退出，不受影响。
+    // 单例 Launcher 上挂的回调连接：每次启动前必须断开上一次的，
+    // 否则同进程多次启动会累积连接，旧回调被新游戏的事件再次触发（双上报/污染）。
+    // 文件级静态持有，避免改动公开头文件（保持 SDK 接口稳定）。
+    static QList<QMetaObject::Connection> s_launchConns;
+    auto releaseLaunchConns = []() {
+        for (const auto &c : s_launchConns) QObject::disconnect(c);
+        s_launchConns.clear();
+    };
+    releaseLaunchConns();
+
     if (onLog) {
-        QObject::connect(&launcher, &Launcher::gameLog,
-                         [onLog](const QString &line) { onLog(line); });
+        s_launchConns.append(QObject::connect(&launcher, &Launcher::gameLog,
+                         [onLog](const QString &line) { onLog(line); }));
     }
     if (onExit) {
-        QObject::connect(&launcher, &Launcher::gameExited,
-                         [onExit](int code, const QString &) { onExit(code); });
+        s_launchConns.append(QObject::connect(&launcher, &Launcher::gameExited,
+                         [onExit](int code, const QString &) { onExit(code); }));
         // FailedToStart 只发 launchFailed 不发 gameExited——必须转发，否则 CLI 挂死
-        QObject::connect(&launcher, &Launcher::launchFailed,
-                         [onExit](const QString &) { onExit(-1); });
+        s_launchConns.append(QObject::connect(&launcher, &Launcher::launchFailed,
+                         [onExit](const QString &) { onExit(-1); }));
     }
 
     return launcher.launch(version, java, login);
@@ -637,6 +695,7 @@ bool setModEnabled(const QString &displayName, const QString &fileName, bool ena
     if (modsPath.isEmpty()) return false;
 
     bool currentlyEnabled = fileName.endsWith(".jar");
+    // 已是目标状态：文件存在即视为成功（幂等，本就达成调用方意图）
     if (currentlyEnabled == enabled) return QFile::exists(modsPath + fileName);
     // ".disabled" 共 9 字符：启用 = 去尾，禁用 = 追加
     QString toName = enabled ? fileName.left(fileName.size() - 9)
@@ -677,20 +736,35 @@ QList<PlayerEntry> listPlayers() {
     return result;
 }
 
+// 名称清洗：去掉控制字符（C0/C1，含 ESC 0x1b），避免玩家名/实例名里夹带
+// 终端控制序列（会被 TUI 选择器原样写进终端，造成转义注入）
+static QString sanitizeDisplayName(const QString &name) {
+    QString out;
+    out.reserve(name.size());
+    for (const QChar ch : name) {
+        const ushort u = ch.unicode();
+        if (u < 0x20 || (u >= 0x7F && u <= 0x9F)) continue;  // 控制字符丢弃
+        out.append(ch);
+    }
+    return out.trimmed();
+}
+
 PlayerEntry addPlayer(const QString &name, const QString &avatar, const QString &skinType,
                       const QString &customUuid) {
+    const QString safeName = sanitizeDisplayName(name);
     QString uuid = customUuid;
     uuid.remove('{'); uuid.remove('}');
     if (uuid.isEmpty()) uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    Settings::instance().setProfile(uuid, "Name", name);
+    Settings::instance().setProfile(uuid, "Name", safeName);
     Settings::instance().setProfile(uuid, "Avatar", avatar);
     Settings::instance().setProfile(uuid, "SkinType", skinType);
 
-    // 首个玩家自动选中
-    if (Settings::instance().playerProfiles().size() == 1)
+    // 当前没有选中玩家时自动选中（initDefaults 会预置一个默认 Profile，
+    // 因此不能靠 playerProfiles().size()==1 判断"首个"）
+    if (Settings::instance().selectedPlayer().isEmpty())
         Settings::instance().selectPlayer(uuid);
 
-    return {uuid, name, avatar, skinType};
+    return {uuid, safeName, avatar, skinType};
 }
 
 bool updatePlayer(const QString &uuid, const QString &name, const QString &avatar,
@@ -703,7 +777,8 @@ bool updatePlayer(const QString &uuid, const QString &name, const QString &avata
     if (!target.isEmpty() && target != uuid && s.playerProfiles().contains(target))
         return false;  // 目标键已被占用，拒绝覆盖
 
-    s.setProfile(uuid, "Name", name);
+    const QString safeName = sanitizeDisplayName(name);
+    s.setProfile(uuid, "Name", safeName);
     s.setProfile(uuid, "Avatar", avatar);
     s.setProfile(uuid, "SkinType", skinType);
 
@@ -939,10 +1014,7 @@ bool startServer(const QString &versionId, LogCallback onLog, ExitCallback onExi
     if (!QDir(dir).exists()) return false;
 
     // EULA 闸门：只检查不接受（接受动作在 CLI 交互里）
-    QFile eulaFile(dir + "eula.txt");
-    bool accepted = eulaFile.open(QIODevice::ReadOnly)
-                    && eulaFile.readAll().contains("eula=true");
-    if (!accepted) return false;
+    if (!isEulaAccepted(dir)) return false;
 
     // 最小 server.properties：只在缺失时写（不覆盖用户手改）；
     // online-mode=false 是离线/authlib 外置登录玩家能进服的前提

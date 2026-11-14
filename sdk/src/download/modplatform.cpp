@@ -134,7 +134,9 @@ QString ModPlatform::getFileDownloadUrl(Platform platform,
     case CurseForge:
         return QString("%1/mods/%2/files/%3/download-url").arg(CF_API, modId, fileId);
     case Modrinth:
-        return QString("%1/project/%2/version/%3").arg(MR_API, modId, fileId);
+        // Modrinth 没有 /project/{id}/version/{vid} 路由；单版本走 GET /version/{id}
+        // （fileId 在上层就是 version id，见 getModrinthFiles）
+        return QString("%1/version/%2").arg(MR_API, fileId);
     }
     return {};
 }
@@ -218,16 +220,22 @@ void ModPlatform::getCurseForgeModDetails(const QString &modId,
                                             std::function<void(bool, ModResource)> onComplete) {
     QString url = CF_API + "/mods/" + modId;
 
-    cfJsonGet(url, [onComplete](bool ok, QString, json result) {
+    cfJsonGet(url, [this, modId, onComplete](bool ok, QString, json result) {
             ModResource r;
             if (!ok || !result.contains("data")) { onComplete(false, r); return; }
             auto &item = result["data"];
             r.id = QString::number(item.value("id", 0));
             r.name = jsonStr(item, "name");
             r.summary = jsonStr(item, "summary");
-            r.description = jsonStr(item, "description");
             r.downloadCount = item.value("downloadCount", 0);
-            onComplete(true, r);
+            // /mods/{id} 的响应不含正文：正文必须另请求 /mods/{id}/description
+            // （CF 返回的是 HTML 片段字符串，这里原样带回由前端渲染）
+            QString descUrl = CF_API + "/mods/" + modId + "/description";
+            cfJsonGet(descUrl, [r, onComplete](bool ok2, QString, json desc) mutable {
+                if (ok2 && desc.contains("data") && desc["data"].is_string())
+                    r.description = QString::fromStdString(desc["data"].get<std::string>());
+                onComplete(true, r);
+            });
         });
 }
 

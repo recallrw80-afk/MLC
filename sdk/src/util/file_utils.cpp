@@ -357,9 +357,12 @@ bool extractZip(const QString &zipPath, const QString &destDir, QString *errorOu
     int failed = 0;
     for (const auto &e : entries) {
         if (e.name.endsWith('/')) continue;  // 目录条目
-        // zip-slip 防护：拒绝绝对路径和 .. 穿越（恶意整合包可任意写文件）
+        // zip-slip 防护：拒绝绝对路径和 .. 穿越（恶意整合包可任意写文件）。
+        // 计为失败——否则"只含恶意条目"的包会被当成解压成功，与头文件
+        // "全部条目成功才返回 true" 的契约相悖。
         if (e.name.startsWith('/') || e.name.split('/').contains("..")) {
-            qWarning() << "extractZip: skip unsafe entry" << e.name;
+            qWarning() << "extractZip: reject unsafe entry" << e.name;
+            failed++;
             continue;
         }
         if (!inflateEntryToFile(file, e, destDir + "/" + e.name)) {

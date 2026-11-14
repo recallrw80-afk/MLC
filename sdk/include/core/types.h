@@ -32,16 +32,16 @@ struct JavaEntry {
     bool isUserImport = false;
 
     QString toString() const {
-        QString versionStr;
-        if (version.majorVersion() == 1) {
-            versionStr = QString::number(version.minorVersion());
-        } else {
-            versionStr = QString::number(version.majorVersion());
-        }
-        return QString("%1 %2 (%3)%4: %5")
+        // "%1 %2" 用 majorVersion，"%3" 只在它与 majorVersion 不一致时补全版本号，
+        // 避免出现 "JRE 8 (1.8.0.321)" 这种重复/矛盾的显示
+        const QString full = version.toString();
+        const bool redundant = (majorVersion > 0
+                                && (full == QString::number(majorVersion)
+                                    || full.endsWith('.' + QString::number(majorVersion))));
+        return QString("%1 %2%3%4: %5")
             .arg(isJre ? "JRE" : "JDK")
             .arg(majorVersion)
-            .arg(version.toString())
+            .arg(redundant || full.isEmpty() ? QString() : QString(" (%1)").arg(full))
             .arg(is64Bit ? "" : ", 32-bit")
             .arg(pathFolder);
     }

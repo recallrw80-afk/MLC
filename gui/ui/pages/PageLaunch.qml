@@ -846,6 +846,9 @@ Item {
                                     text: "取消"
                                     colorType: 2
                                     onClicked: {
+                                        // 必须显式取消后端轮询，否则迟到的成功结果
+                                        // 会在切回离线后仍写入 loginResult 并被用于启动
+                                        msAuth.cancel();
                                         page.msPolling = false;
                                         page.loginType = 0;
                                     }
@@ -1850,6 +1853,9 @@ Item {
         // 在线模式未登录 → 不允许启动（双重保险）
         if (page.loginType === 5 && !login)
             return;
+        // 离线模式绝不带在线登录态（防止取消登录后残留的 MS token 被误用）
+        if (page.loginType !== 5)
+            login = null;
         // 离线模式 → 输入了新名字则先落库为玩家（已存在同名直接选中），再用选中玩家生成登录态
         if (login === null) {
             var typedName = page.accountName.trim();
@@ -1862,6 +1868,9 @@ Item {
     // qmllint enable unqualified
 
     function startMsLogin() {
+        // 防重入：轮询进行中再点启动不得重新发起登录（旧会话会被顶掉并污染状态）
+        if (page.msPolling)
+            return;
         page.loginResult = null;
         page.msPolling = true;
         msAuth.startLogin();

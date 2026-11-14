@@ -277,7 +277,9 @@ void AssetDownloader::downloadLibraries(const McVersion &version,
     }
 
     // Count downloadable libraries (those with artifact downloads, passing rules)
-    QList<std::pair<QString, QString>> toDownload; // <url, savePath>
+    // 第三项是期望 sha1：下载后必须校验（200-坏字节会静默产出损坏库 → 运行期崩溃）
+    struct LibTask { QString url; QString savePath; QString sha1; };
+    QList<LibTask> toDownload;
 
     for (const auto &lib : versionJson["libraries"]) {
         if (!lib.is_object()) continue;
@@ -298,7 +300,7 @@ void AssetDownloader::downloadLibraries(const McVersion &version,
             QString savePath = version.pathIndie + "libraries/" + rel;
             if (QFileInfo::exists(savePath)) continue;  // 无 sha1 可校验，存在即跳过
             QDir().mkpath(QFileInfo(savePath).absolutePath());
-            toDownload.append({base + rel, savePath});
+            toDownload.append({base + rel, savePath, QString()});
             continue;
         }
 
@@ -316,7 +318,8 @@ void AssetDownloader::downloadLibraries(const McVersion &version,
         }
 
         QDir().mkpath(QFileInfo(savePath).absolutePath());
-        toDownload.append({QString::fromStdString(url), savePath});
+        toDownload.append({QString::fromStdString(url), savePath,
+                           QString::fromStdString(sha1)});
     }
 
     if (toDownload.isEmpty()) {
@@ -335,9 +338,17 @@ void AssetDownloader::downloadLibraries(const McVersion &version,
 
     for (const auto &item : toDownload) {
         DownloadManager::instance().download(
-            item.first, item.second,
+            item.url, item.savePath,
             nullptr,
-            [this, completed, failed, totalPtr, onComplete](bool success, QString) {
+            [this, completed, failed, totalPtr, onComplete,
+             savePath = item.savePath, expectedSha1 = item.sha1](bool success, QString) {
+                // 下载成功也要校验 sha1：CDN 出错/代理篡改/截断都会产出"成功"的坏文件
+                if (success && !expectedSha1.isEmpty()
+                    && !FileUtils::verifySha1(savePath, expectedSha1)) {
+                    emit downloadLog("Library SHA1 mismatch, removing: " + savePath);
+                    QFile::remove(savePath);
+                    success = false;
+                }
                 (*completed)++;
                 emit downloadProgress("Libraries", *completed, *totalPtr);
                 if (!success) (*failed)++;
@@ -423,7 +434,9 @@ void AssetDownloader::downloadAssets(const McVersion &version,
         }
 
         auto &objects = assetIndexJson["objects"];
-        QList<std::pair<QString, QString>> toDownload; // <url, savePath>
+        // 第三项是期望 sha1：下载后必须校验，否则损坏资源会被当成有效资源静默接受
+        struct AssetTask { QString url; QString savePath; QString sha1; };
+        QList<AssetTask> toDownload;
 
         for (auto it = objects.begin(); it != objects.end(); ++it) {
             std::string hash = jsonStrOr(it.value(), "hash");
@@ -438,7 +451,7 @@ void AssetDownloader::downloadAssets(const McVersion &version,
 
             QString url = "https://resources.download.minecraft.net/" + subPath;
             QDir().mkpath(QFileInfo(savePath).absolutePath());
-            toDownload.append({url, savePath});
+            toDownload.append({url, savePath, hashStr});
         }
 
         if (toDownload.isEmpty()) {
@@ -456,9 +469,17 @@ void AssetDownloader::downloadAssets(const McVersion &version,
 
         for (const auto &item : toDownload) {
             DownloadManager::instance().download(
-                item.first, item.second,
+                item.url, item.savePath,
                 nullptr,
-                [this, completed, failed, total, onComplete](bool success, QString) {
+                [this, completed, failed, total, onComplete,
+                 savePath = item.savePath, expectedSha1 = item.sha1](bool success, QString) {
+                    // 内容损坏的资源既非"成功"也非网络失败——必须删掉并计入 failed，
+                    // 否则坏文件留在 assets/objects/ 里导致贴图/音效随机出错
+                    if (success && !FileUtils::verifySha1(savePath, expectedSha1)) {
+                        emit downloadLog("Asset SHA1 mismatch, removing: " + savePath);
+                        QFile::remove(savePath);
+                        success = false;
+                    }
                     (*completed)++;
                     if (!success) (*failed)++;
                     if (*completed % 50 == 0 || *completed >= total) {

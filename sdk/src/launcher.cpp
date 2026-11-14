@@ -387,18 +387,20 @@ void Launcher::onGameError(QProcess::ProcessError error) {
         // 避免 launchFailed + gameExited 双触发（且运行中崩溃不是"启动失败"）
         return;
     }
-    QString errMsg;
-    switch (error) {
-    case QProcess::FailedToStart:
-        errMsg = "Failed to start game process. Check Java installation.";
-        break;
-    case QProcess::Timedout:
-        errMsg = "Game process timed out.";
-        break;
-    default:
-        errMsg = "Game process error: " + m_gameProcess->errorString();
-        break;
+    // 用户已取消：异步错误（kill 触发的 abort 等）不得把 Interrupted 覆盖成 Failed
+    if (m_state == LaunchState::Interrupted) return;
+
+    // 只有 FailedToStart 才是"启动失败"（进程从未起来，不会再有 finished）。
+    // 运行期 I/O/超时错误时进程仍在跑：终态交给 finished() 统一上报，
+    // 否则会先发 launchFailed、退出时再发 gameExited，双上报且污染运行中状态。
+    if (error != QProcess::FailedToStart) {
+        appendLog("[MLC] Game process I/O error: " + m_gameProcess->errorString());
+        qCWarning(logLaunch) << "Game process error (non-fatal, waiting for exit):"
+                             << m_gameProcess->errorString();
+        return;
     }
+
+    QString errMsg = "Failed to start game process. Check Java installation.";
 
     appendLog("[MLC] ERROR: " + errMsg);
     qCWarning(logLaunch) << errMsg;

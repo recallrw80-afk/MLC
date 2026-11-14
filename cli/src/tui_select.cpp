@@ -58,8 +58,22 @@ int charCols(uint ucs4) {
     return 1;
 }
 
+// 去掉控制字符（C0/C1，含 ESC）：名称可能来自玩家输入或整合包清单，
+// 原样写进终端会注入转义序列（改光标/改颜色/伪造输出）
+QString stripControl(const QString &text) {
+    QString out;
+    out.reserve(text.size());
+    for (const QChar ch : text) {
+        const ushort u = ch.unicode();
+        if (u < 0x20 || (u >= 0x7F && u <= 0x9F)) continue;
+        out.append(ch);
+    }
+    return out;
+}
+
 // 截断到 maxCols 列：超长补 …，保证返回值渲染后不换行（换行会打乱菜单的行数数学）
-QString fitCols(const QString &text, int maxCols) {
+QString fitCols(const QString &textIn, int maxCols) {
+    const QString text = stripControl(textIn);
     const auto cps = text.toUcs4();
     int cols = 0;
     int kept = 0;

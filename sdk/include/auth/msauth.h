@@ -44,6 +44,7 @@ private:
     void getMinecraftProfile(const QString &mcAccessToken);
 
     /// Emit loginFinished and invoke the callback (if set) with the same result.
+    /// 保证每个会话恰好回调一次：内部先取走 callback 并标记会话结束。
     void finishLogin(bool success, const LoginResult &result);
 
     QNetworkAccessManager *m_nam = nullptr;
@@ -51,6 +52,13 @@ private:
     QTimer *m_pollTimer = nullptr;
     int m_pollRetries = 0;
     bool m_cancelled = false;
+    /// 会话序号：每次 login() 自增。所有异步回调校验自己所属会话，
+    /// 防止旧会话（已取消/被新登录顶掉）污染新会话状态。
+    quint64 m_session = 0;
+    /// 当前会话是否仍有效（false = 已终结或已被取消）
+    bool m_active = false;
+    /// 设备码绝对截止时间（毫秒时间戳，来自 devicecode 的 expires_in；0 = 未设置）
+    qint64 m_deadlineMs = 0;
 };
 
 #endif // MLC_MSAUTH_H

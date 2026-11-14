@@ -77,8 +77,12 @@ QNetworkReply* DownloadManager::downloadInternal(const QString &url,
     // 首字节后每次传输活动重置为 30s 停滞计时。不能用 setTransferTimeout——它从请求创建即计时
     QTimer *stallTimer = new QTimer(reply);
     stallTimer->setSingleShot(true);
-    connect(stallTimer, &QTimer::timeout, reply, [reply, url]() {
+    // stallAbort=true 表示本次 abort 由超时器发起（应重试）；
+    // 否则是调用方主动 abort（取消，不应重试也不应报"下载失败"）
+    auto stallAbort = QSharedPointer<bool>::create(false);
+    connect(stallTimer, &QTimer::timeout, reply, [reply, url, stallAbort]() {
         qCWarning(logDl) << "Transfer stalled, aborting:" << url;
+        *stallAbort = true;
         reply->abort();
     });
     auto restartStallTimer = [stallTimer]() { stallTimer->start(30000); };
@@ -97,10 +101,21 @@ QNetworkReply* DownloadManager::downloadInternal(const QString &url,
     // Completion
     connect(reply, &QNetworkReply::finished, this, [=, this]() {
         stallTimer->stop();
-        reply->deleteLater();
 
         int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         bool success = (reply->error() == QNetworkReply::NoError);
+
+        // 用户主动取消：不是网络错误，直接按终态上报，绝不重试
+        // （QNetworkReply::abort() 产生 OperationCanceledError）
+        if (!success && reply->error() == QNetworkReply::OperationCanceledError
+            && !*stallAbort) {
+            reply->deleteLater();
+            qCInfo(logDl) << "Download canceled by caller:" << url;
+            emit downloadFinished(url, false, QStringLiteral("canceled"));
+            if (onComplete) onComplete(false, QStringLiteral("canceled"));
+            return;
+        }
+        reply->deleteLater();
 
         // Handle HTTP errors
         if (statusCode >= 400) success = false;
@@ -293,16 +308,16 @@ QString DownloadManager::versionManifestUrl() {
 }
 
 QString DownloadManager::versionJsonUrl(const QString &versionId) {
-    // The version manifest gives us the per-version URL
-    // This is a fallback — normally fetch manifest first, then use the returned URL
-    // For known version IDs we construct the URL directly
-    return QString("https://launchermeta.mojang.com/v1/packages/"
-                   "%1/%2.json")
-        .arg(QString(QCryptographicHash::hash(versionId.toUtf8(), QCryptographicHash::Sha1).toHex().left(2)),
-             versionId);
+    // 版本 JSON 的真实地址来自 version_manifest 里该条目的 url 字段（路径是
+    // JSON 内容的 sha1，无法由版本号推出）。这里按“先查清单”给出可工作的入口，
+    // 不再构造必然 404 的伪路径。
+    Q_UNUSED(versionId)
+    return versionManifestUrl();
 }
 
 QString DownloadManager::assetsIndexUrl(const QString &assetsVersion) {
-    return QString("https://launchermeta.mojang.com/v1/packages/%1.json")
-        .arg(assetsVersion);
+    // 同理：资源索引地址也来自版本 JSON 的 assetIndex.url（按内容哈希），
+    // 不能用资源索引 id 拼。id 为空时返回空串，调用方应改读版本 JSON。
+    Q_UNUSED(assetsVersion)
+    return {};
 }

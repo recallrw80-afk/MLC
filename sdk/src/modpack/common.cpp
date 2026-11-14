@@ -70,6 +70,24 @@ bool validateInstanceName(const QString &name) {
     return true;
 }
 
+// 清单里的相对子目录（overrides 等）必须是 packDir 内的简单相对路径。
+// 拒绝：空、绝对路径、盘符、反斜杠（跨平台穿越）、任何 ".." 段。
+// 合法时返回规范化绝对路径（不含尾斜杠），非法返回空串。
+QString resolvePackSubdir(const QString &packDir, const QString &rel) {
+    if (rel.isEmpty()) return {};
+    if (rel.contains('\\')) return {};            // Windows 风格分隔符一律拒绝
+    if (rel.startsWith('/')) return {};           // 绝对路径
+    if (rel.size() >= 2 && rel[1] == ':') return {};  // 盘符 C:
+    for (const QString &seg : rel.split('/', Qt::SkipEmptyParts)) {
+        if (seg == ".." || seg == ".") return {};
+    }
+    const QString base = QDir(packDir).absolutePath();
+    const QString joined = QDir::cleanPath(base + "/" + rel);
+    // 包含性检查：规范化后必须仍在 packDir 之内（防 cleanPath 绕过）
+    if (joined != base && !joined.startsWith(base + '/')) return {};
+    return joined;
+}
+
 // 本进程专属的导入临时目录 {mcFolder}/tmp/<pid>/（多进程并发 inpack 互不互删）
 QString packTmpRoot() {
     return VersionManager::instance().mcFolder() + "tmp/" +
@@ -93,6 +111,21 @@ void markComplete(const QString &finalDir) {
 }
 
 // 导入失败时回滚：删实例目录 + 清理 INI 映射 + 清本进程 tmp/<pid>/
+// 兜底回滚：把 instances/ 下仍带 .incomplete 标记的目录删掉（含 INI 映射）
+// 只动"导入中"的目录，绝不碰已完成实例
+void rollbackIncompleteInstances() {
+    const QString instancesDir = VersionManager::instance().mcFolder() + "instances/";
+    QDir dir(instancesDir);
+    if (!dir.exists()) return;
+    for (const auto &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString path = entry.absoluteFilePath();
+        if (!QFile::exists(path + "/.incomplete")) continue;
+        qWarning() << "rollbackIncompleteInstances: removing half-built instance" << path;
+        Settings::instance().removeInstanceDir(entry.fileName());
+        FileUtils::removeTree(path);
+    }
+}
+
 void cleanupOnError(const QString &finalDir) {
     QString dirName = QDir(finalDir).dirName();
     FileUtils::removeTree(finalDir);  // 不顺符号链接（包内容不可控）

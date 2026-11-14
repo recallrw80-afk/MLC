@@ -61,6 +61,10 @@ static void installModpackFromDir(const QString &filePath, const QString &packDi
             break;
         }
     } catch (const std::exception &e) {
+        // 安装器可能已经 beginInstall()（建好实例目录 + .incomplete 标记）后才抛异常：
+        // 这里拿不到 finalDir，按"本进程刚建的 .incomplete 目录"回滚，避免残留半成品
+        rollbackIncompleteInstances();
+        cleanupPackTmp();
         if (onComplete) onComplete(false, QString("清单解析失败: %1").arg(e.what()));
     }
 }

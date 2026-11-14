@@ -113,6 +113,10 @@ void Installer::runInstallerJar(const QString &jarPath, const QString &javaPath,
     QProcess *proc = new QProcess(this);
     proc->setProgram(javaPath);
     proc->setArguments(args);
+    // 安装器（尤其 Forge）会在工作目录写下 <jar>-installer.jar.log 等文件。
+    // 不设工作目录时会落到启动器的 CWD（仓库根/构建目录），污染工作区。
+    // 统一指到系统临时目录（jar 本身就下载在 QDir::temp()）。
+    proc->setWorkingDirectory(QDir::tempPath());
 
     connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this, proc, onComplete](int exitCode, QProcess::ExitStatus) {

@@ -121,10 +121,27 @@ int handleServerStart(QStringList &args) {
 
     // EULA 闸门：--eula 直接书面同意；TTY 交互确认；否则拒绝
     bool eulaFlag = args.contains("--eula");
-    QFile eulaFile(dir + "eula.txt");
-    bool accepted = eulaFile.open(QIODevice::ReadOnly)
-                    && eulaFile.readAll().contains("eula=true");
-    eulaFile.close();
+    // 只认真正的 eula=true 键：注释行 "#eula=true" 不算同意
+    auto readEula = [&dir]() {
+        QFile f(dir + "eula.txt");
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+        const QString all = QString::fromUtf8(f.readAll());
+        f.close();
+        for (const QString &raw : all.split('\n')) {
+            QString line = raw;
+            const int hash = line.indexOf('#');
+            if (hash >= 0) line = line.left(hash);
+            line = line.trimmed();
+            if (line.isEmpty()) continue;
+            const int eq = line.indexOf('=');
+            if (eq < 0) continue;
+            if (line.left(eq).trimmed().compare("eula", Qt::CaseInsensitive) == 0
+                && line.mid(eq + 1).trimmed().compare("true", Qt::CaseInsensitive) == 0)
+                return true;
+        }
+        return false;
+    };
+    bool accepted = readEula();
     if (!accepted && eulaFlag) {
         QFile f(dir + "eula.txt");
         if (f.open(QIODevice::WriteOnly)) f.write("eula=true\n");

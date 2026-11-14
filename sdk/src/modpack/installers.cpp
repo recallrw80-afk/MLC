@@ -45,10 +45,15 @@ void installCurseForge(const QString &filePath, const QString &packDir,
     if (!beginInstall(instanceName, packName, onComplete, finalDir, name)) return;
     if (onProgress) onProgress("CurseForge modpack detected: " + name, 15);
 
-    // 复制 overrides
+    // 复制 overrides（清单字段不可信：必须是 packDir 内的相对路径，防目录穿越）
     QString overridesDir = QString::fromStdString(manifest.value("overrides", "overrides"));
-    QString srcOverride = packDir + "/" + overridesDir;
-    if (QDir(srcOverride).exists()) {
+    QString srcOverride = resolvePackSubdir(packDir, overridesDir);
+    if (srcOverride.isEmpty() && !overridesDir.isEmpty()) {
+        cleanupOnError(finalDir);
+        if (onComplete) onComplete(false, "清单中的 overrides 路径非法: " + overridesDir);
+        return;
+    }
+    if (!srcOverride.isEmpty() && QDir(srcOverride).exists()) {
         if (onProgress) onProgress("Copying modpack files...", 20);
         if (!copyOrFail(srcOverride, finalDir, onComplete)) return;
     }
@@ -191,9 +196,14 @@ void installMCBBS(const QString &filePath, const QString &packDir,
     if (!beginInstall(instanceName, packName, onComplete, finalDir, name)) return;
     if (onProgress) onProgress("MCBBS modpack detected: " + name, 15);
 
-    // 复制 overrides
-    QString srcOverride = packDir + "/" + overridesDir;
-    if (QDir(srcOverride).exists()) {
+    // 复制 overrides（packmeta 字段不可信：必须是 packDir 内的相对路径）
+    QString srcOverride = resolvePackSubdir(packDir, overridesDir);
+    if (srcOverride.isEmpty() && !overridesDir.isEmpty()) {
+        cleanupOnError(finalDir);
+        if (onComplete) onComplete(false, "清单中的 overrides 路径非法: " + overridesDir);
+        return;
+    }
+    if (!srcOverride.isEmpty() && QDir(srcOverride).exists()) {
         if (onProgress) onProgress("Copying modpack files...", 20);
         if (!copyOrFail(srcOverride, finalDir, onComplete)) return;
     }
@@ -670,6 +680,12 @@ void installCompressed(const QString &filePath, const QString &packDir,
     ini.setValue("Name", name);
     ini.setValue("VersionArgumentIndie", 1);
     ini.setValue("VersionArgumentIndieV2", true);
+    // 与下载管线的 finalizeNow 保持一致：launch 依赖 Version 键解析启动版本，
+    // 缺了会导致这个路径装出来的实例启动时版本解析不到
+    {
+        const QString vn = resolveInstanceVersionName(finalDir, QString(), QString(), QString());
+        if (!vn.isEmpty()) ini.setValue("Version", vn);
+    }
     ini.endGroup();
     ini.sync();
     writeInstanceMapping(instanceDir, name);
@@ -698,17 +714,92 @@ void installMod(const QString &packDir, const QString &targetInstance,
 
     // 递归收集包内所有 jar → 实例 mods/（拍平到文件名）
     if (onProgress) onProgress("Copying mods...", 50);
-    QDir(instDir + "mods/").mkpath(".");
-    int copied = 0;
+    QString modsDir = instDir + "mods/";
+    if (!QDir().mkpath(modsDir)) {
+        if (onComplete) onComplete(false, "无法创建 mods 目录: " + modsDir);
+        return;
+    }
+
+    // 先收集全部 jar（算清总数，用于判定"全部成功"）
+    QStringList jarPaths;
     QDirIterator it(packDir, {"*.jar"}, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         it.next();
-        QFile::remove(instDir + "mods/" + it.fileName());  // 覆盖同名旧版
-        if (QFile::copy(it.filePath(), instDir + "mods/" + it.fileName()))
-            copied++;
+        jarPaths.append(it.filePath());
     }
+
+    // 第一阶段：全部复制成临时文件（不碰任何已有 mod，避免"先删后拷"在失败时丢数据）
+    QStringList staged;   // 临时文件路径
+    QStringList targets;  // 最终目标路径
+    QString copyErr;
+    for (const QString &src : jarPaths) {
+        const QString fileName = QFileInfo(src).fileName();
+        if (fileName.isEmpty()) {
+            copyErr = "包内 jar 文件名为空: " + src;
+            break;
+        }
+        QString dst = modsDir + fileName;
+        QString tmp = dst + ".mlc-new";
+        QFile::remove(tmp);  // 清上轮残留
+        if (!QFile::copy(src, tmp)) {
+            copyErr = QString("复制失败: %1（磁盘已满或无权限？）").arg(fileName);
+            break;
+        }
+        staged.append(tmp);
+        targets.append(dst);
+    }
+
+    // 任一 jar 复制失败 = 整体失败：删掉临时文件，实例 mods/ 保持原样
+    if (!copyErr.isEmpty()) {
+        for (const QString &tmp : staged) QFile::remove(tmp);
+        if (onComplete) onComplete(false, copyErr);
+        return;
+    }
+
+    // 第二阶段：提交（旧文件先改名备份，失败可完整回滚）
+    QStringList committed;  // 已换入的目标路径
+    QStringList backups;    // 对应的备份路径（空串 = 原本无同名文件）
+    QString commitErr;
+    for (int i = 0; i < staged.size() && commitErr.isEmpty(); ++i) {
+        const QString dst = targets[i];
+        const QString tmp = staged[i];
+        QString bak;
+        if (QFile::exists(dst)) {
+            bak = dst + ".mlc-old";
+            QFile::remove(bak);
+            if (!QFile::rename(dst, bak)) {
+                commitErr = QString("替换失败: %1（文件被占用？）").arg(QFileInfo(dst).fileName());
+                break;
+            }
+        }
+        if (!QFile::rename(tmp, dst)) {
+            if (!bak.isEmpty()) QFile::rename(bak, dst);  // 还原这一项
+            commitErr = QString("写入失败: %1").arg(QFileInfo(dst).fileName());
+            break;
+        }
+        committed.append(dst);
+        backups.append(bak);
+    }
+
+    if (!commitErr.isEmpty()) {
+        // 回滚已提交项：删新文件、恢复备份
+        for (int i = 0; i < committed.size(); ++i) {
+            QFile::remove(committed[i]);
+            if (!backups[i].isEmpty()) QFile::rename(backups[i], committed[i]);
+        }
+        // 清理未提交的临时文件
+        for (int j = committed.size(); j < staged.size(); ++j) QFile::remove(staged[j]);
+        if (onComplete) onComplete(false, commitErr);
+        return;
+    }
+
+    // 全部提交成功：删除备份
+    for (const QString &bak : backups) {
+        if (!bak.isEmpty()) QFile::remove(bak);
+    }
+
     if (onProgress) onProgress("Complete", 100);
     // mod 包不走下载管线（无 finalizeNow），成功时自行清理本进程 tmp/<pid>/
     cleanupPackTmp();
-    if (onComplete) onComplete(true, QString("%1 mod(s) added to %2").arg(copied).arg(targetInstance));
+    if (onComplete) onComplete(true, QString("%1 mod(s) added to %2").arg(committed.size()).arg(targetInstance));
 }
