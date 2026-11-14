@@ -1,9 +1,21 @@
+# Release —— 发版产物构建（Rust 优先）
+#
+# 2026-11-14 重构：目录交换后 Rust 升为仓库根与主开发线，且 Rust CLI 已实现全部 29 个命令
+# （与 C++ 版 parity）。发版产物因此以 **Rust 二进制为主**；C++ 包保留为过渡期可选。
+#
+# 产物形态对比：
+#   Rust  mlc → 单文件（仅依赖系统 glibc / liblzma / libgcc_s）
+#   C++   mlc → mlc + lib/ + plugins/（收编 Qt/第三方库，见 cpp/cli/bundle-dist.sh）
+#
+# 分工约定（保持原有红线）：
+#   - x86_64 Linux「嵌 CF key 的完整体验包」仍由本地 ./release.sh 构建上传
+#     （CI 无 key Secret 时产物不含内嵌 key，退回 MCIM 镜像）
+#   - 本 workflow 在 tag 推送时构建**其余平台**的 Rust 二进制并附加到 Release
+#   - 禁止在本 workflow 中调用 mirror-gitee.sh（同步由维护者手动执行）
+#
+# 打包逻辑放在 .github/scripts/ 下，避免在 YAML 块标量里嵌套 heredoc（会导致解析失败）。
 name: Release
 
-# 分工（2026-08-07 定稿）：
-# - x86_64 Linux 完整体验包（嵌 CF key）由 ./release.sh 本地构建上传——CI 未配 key Secret
-# - macOS 包由本 workflow 在 tag 推送时构建（macos runner + Qt clang_64 universal）
-# - aarch64 Linux 无预编译包（Qt 官方无 6.11 Linux ARM64 安装包），用户走源码编译
 on:
   push:
     tags: ['v*']
@@ -12,72 +24,117 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build:
+  # ---- 构建各平台 Rust 二进制 ----
+  build-rust:
+    name: rust ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Qt 6 macOS 官方包是 universal2；但 liblzma 只有单架构，
-          # universal 链接不出——macOS 包只做 Apple Silicon（arm64）
-          - runner: macos-latest
-            qt_arch: clang_64
-            pkg_os: macos-aarch64
-    runs-on: ${{ matrix.runner }}
+          # 注：linux-x86_64 由本地 ./release.sh 构建并上传（能嵌 CF key，
+          # 而 CI 的 Secret 与本地 .env 是两套）。此处刻意不产，避免同名产物互相覆盖。
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, pkg_os: linux-aarch64, cross: aarch64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,   pkg_os: windows-x86_64 }
+          - { os: macos-latest,  target: aarch64-apple-darwin,      pkg_os: macos-aarch64 }
+          - { os: macos-latest,  target: x86_64-apple-darwin,       pkg_os: macos-x86_64, mac_arch: x86_64 }
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        # xz：liblzma 头文件（Xcode SDK 只有 dylib 没有 lzma.h）
-        run: brew install ninja xz
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          version: '6.11.1'
-          arch: ${{ matrix.qt_arch }}
-          cache: true
+          targets: ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: ${{ matrix.target }}
+
+      # CF key：存在 Secret 时写入 .env，build.rs 会嵌入（与 C++ 的 MLC_EMBED_CF_KEY 语义一致）
       - name: Prepare embedded CF key (optional)
-        # 仓库 Secret 配了 MLC_CURSEFORGE_API_KEY 时嵌入（macOS 包也走官方 API）；
-        # 未配置则产物无 key 走 MCIM 镜像。fork PR 读不到 secrets。
+        shell: bash
         env:
           CF_KEY: ${{ secrets.MLC_CURSEFORGE_API_KEY }}
-        run: |
-          echo "EMBED_CF=OFF" >> "$GITHUB_ENV"
-          if [ -n "$CF_KEY" ]; then
-            echo "MLC_CURSEFORGE_API_KEY=$CF_KEY" > .env
-            echo "EMBED_CF=ON" >> "$GITHUB_ENV"
-          fi
+        run: bash .github/scripts/prepare-cf-key.sh
 
-      - name: Build zero-dependency package (Apple Silicon)
-        # arm64 单架构：brew 的 liblzma 只有本机架构，universal 双架构链接不出来
+      # aarch64 交叉：aws-lc-sys（rustls 的 provider）走 cmake 编 C，必须给目标 cc
+      - name: Setup aarch64 cross toolchain
+        if: matrix.cross == 'aarch64'
+        run: bash .github/scripts/setup-cross-aarch64.sh
+
+      - name: Setup macOS x86_64 cross
+        if: matrix.mac_arch == 'x86_64'
+        run: echo "CMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
+
+      - name: Build release binary
+        run: cargo build --release -p mlc --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         env:
-          CMAKE_OSX_ARCHITECTURES: 'arm64'
-        run: |
-          QT_ROOT="$(qmake6 -query QT_INSTALL_PREFIX 2>/dev/null || true)"
-          if [ -z "$QT_ROOT" ]; then QT_ROOT="$(cd "$Qt6_DIR/../../.." && pwd)"; fi
-          echo "Qt root: $QT_ROOT"
-          make package-tar QT_PREFIX="$QT_ROOT" MLC_EMBED_CF_KEY="${{ env.EMBED_CF }}"
+          TARGET: ${{ matrix.target }}
+          PKG_OS: ${{ matrix.pkg_os }}
+        run: bash .github/scripts/package-unix.sh
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PKG_OS: ${{ matrix.pkg_os }}
+        run: bash .github/scripts/package-windows.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mlc-${{ matrix.pkg_os }}
-          path: cli/dist/mlc-macos-*.tar.xz
-          retention-days: 14
+          path: |
+            dist/*.tar.xz
+            dist/*.zip
+          retention-days: 30
 
+  # ---- 冒烟测试：本机架构现编现跑，防止发出坏包 ----
+  # 不依赖 build-rust 的产物（那些是交叉编译，本机跑不了），
+  # 而是用同一份源码在本机重编一次并跑 version/help/test。
+  smoke-linux:
+    name: smoke test (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: smoke
+      - name: Build and run
+        run: |
+          set -euo pipefail
+          cargo build --release -p mlc
+          ./target/release/mlc version
+          ./target/release/mlc help > /dev/null
+          echo "冒烟通过：二进制可执行且 --version / help 正常"
+
+  # ---- 把产物附加到 Release（仅 tag 触发）----
   release:
+    name: attach to release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build-rust, smoke-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-      - name: Attach macOS package to Release
-        # release.sh 已建好 Release（含 x86_64 嵌 key 包 + install.sh），此处追加 macOS 包
+      - name: Attach Rust packages to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: '**/mlc-macos-*.tar.xz'
+          files: |
+            artifacts/**/*.tar.xz
+            artifacts/**/*.zip
+          fail_on_unmatched_files: false

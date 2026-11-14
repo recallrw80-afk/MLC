@@ -1,21 +1,44 @@
-# Rust workspace CI（阶段 0 起；与 release.yml 的 C++/Qt 流水线并存）
-# 覆盖计划要求的 5 目标：linux x86_64 / aarch64、windows x86_64(msvc)、macos x86_64+arm64。
-# musl 全静态发布构建属于阶段 4 打包工作，这里先用 gnu 目标验证交叉编译可行性。
+# Rust workspace CI —— 质量门（fmt / clippy / test / 多目标编译验证）
+#
+# 目录布局（2026-11-14 交换后）：
+#   仓库根 = Rust workspace（本 workflow 直接在根跑）
+#   cpp/   = C++ 工程（其 CI 见 release.yml，仅过渡期保留）
+#
+# 目标矩阵按 rust-rewrite-plan.md 阶段 0 要求：
+#   linux x86_64 / aarch64、windows x86_64(msvc)、macos aarch64 + x86_64
+# 说明：musl 全静态发布构建属阶段 4 打包工作，此处在 gnu 目标上验证交叉编译可行性。
+#
+# 重要（2026-11-14）：TLS 走 reqwest 0.13 的 `rustls` feature → provider 是 **aws-lc-rs**
+# （不是 0.12 时代的 ring）。aws-lc-sys 用 cmake 构建 C 代码，因此**交叉编译必须提供
+# 目标架构的 CC/CXX 与 cmake 工具链**，只设 linker 是不够的。
 name: rust-ci
 
 on:
   push:
     branches: [main]
-    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rustfmt.toml', '.github/workflows/rust-ci.yml', 'cpp/**']
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rustfmt.toml'
+      - '.github/workflows/rust-ci.yml'
   pull_request:
-    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rustfmt.toml', '.github/workflows/rust-ci.yml', 'cpp/**']
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rustfmt.toml'
+      - '.github/workflows/rust-ci.yml'
+  workflow_dispatch:
 
 defaults:
   run:
     working-directory: .
 
 jobs:
+  # ---- 质量门：单平台跑全部检查（最快反馈）----
   lint-test:
+    name: fmt / clippy / test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,29 +52,63 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # ---- 多目标编译验证 ----
   build-matrix:
+    name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # --- Linux x86_64：原生，无事可做 ---
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
+
+          # --- Linux aarch64：交叉。aws-lc-sys 需目标 cc + cmake ---
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: aarch64 }
+
+          # --- Windows x86_64：原生 msvc ---
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
+
+          # --- macOS：runner 是 arm64，aarch64 原生；x86_64 为交叉 ---
           - { os: macos-latest, target: aarch64-apple-darwin }
-          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin, mac_arch: x86_64 }
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
           key: ${{ matrix.target }}
-      # aarch64 linux 交叉：装目标架构 C 工具链（ring/aws-lc 等需要目标 cc）
-      - if: matrix.cross
+
+      # ---- Linux aarch64 交叉：装目标 C 工具链 + 显式指定 CC/CXX ----
+      # aws-lc-sys（rustls 的 provider）用 cmake 编 C，必须让它用 aarch64 编译器，
+      # 否则会拿宿主机 gcc 编出 x86_64 目标文件而链接失败。
+      - name: Setup aarch64 cross toolchain
+        if: matrix.cross == 'aarch64'
         run: |
-          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-      - run: cargo build --workspace --target ${{ matrix.target }}
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake
+          {
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
+            echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc"
+            echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++"
+            echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar"
+            # cmake 工具链：让 aws-lc-sys 的 cmake 构建也走交叉编译器
+            echo "CMAKE_C_COMPILER=aarch64-linux-gnu-gcc"
+            echo "CMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
+          } >> "$GITHUB_ENV"
+
+      # ---- macOS x86_64 交叉：必须显式给 -arch x86_64 ----
+      # macos-latest runner 是 arm64；cmake 里的 C 代码默认按宿主架构编，
+      # 不加 CMAKE_OSX_ARCHITECTURES 会得到 arm64 目标文件而无法链进 x86_64 产物。
+      - name: Setup macOS x86_64 cross
+        if: matrix.mac_arch == 'x86_64'
+        run: echo "CMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --workspace --target ${{ matrix.target }}
